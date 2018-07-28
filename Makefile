@@ -1,6 +1,10 @@
 CC65    =       $(HOME)/trees/cc65/bin/
 CPU     =       6502
 
+apple2a.rom: a.out
+	(dd count=5 bs=4096 if=/dev/zero ; cat a.out) > apple2a.rom
+
+
 a.out: main.o interrupt.o vectors.o apple2rom.cfg apple2rom.lib
 	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o main.o apple2rom.lib
 
