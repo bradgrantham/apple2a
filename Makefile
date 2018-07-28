@@ -1,4 +1,5 @@
-CC65    =       $(HOME)/trees/cc65/bin/
+CC65    ?=       $(HOME)/trees/cc65/bin/
+
 CPU     =       6502
 
 apple2a.rom: a.out
