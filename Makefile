@@ -26,5 +26,6 @@ vectors.o: vectors.s
 crt0.o: crt0.s
 	$(CC65)/ca65 --cpu $(CPU) crt0.s
 
-apple2rom.lib: crt0.o
+apple2rom.lib: crt0.o supervision.lib
+	cp supervision.lib apple2rom.lib
 	../cc65/bin/ar65 a apple2rom.lib crt0.o
