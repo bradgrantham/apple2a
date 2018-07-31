@@ -21,29 +21,29 @@ a.out: main.o interrupt.o vectors.o platform.o apple2rom.cfg $(LIB)
 	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o platform.o main.o $(LIB)
 
 clean:
-	rm -f *.o a.out main.s $(LIB) tmp.lib
+	rm -f *.o a.out platform.s main.s $(LIB) tmp.lib
 
 main.s: main.c
-	$(CC65)/cc65 -t none -O --cpu $(CPU) main.c
+	$(CC65)/cc65 -t none -O --cpu $(CPU) $<
 
 main.o: main.s
-	$(CC65)/ca65 --cpu $(CPU) main.s
+	$(CC65)/ca65 --cpu $(CPU) $<
 
 # platform.c contains inline assembly and code that must not be optimized
 platform.s: platform.c
-	$(CC65)/cc65 -t none --cpu $(CPU) platform.c
+	$(CC65)/cc65 -t none --cpu $(CPU) $<
 
 platform.o: platform.s
-	$(CC65)/ca65 --cpu $(CPU) platform.s
+	$(CC65)/ca65 --cpu $(CPU) $<
 
 interrupt.o: interrupt.s
-	$(CC65)/ca65 --cpu $(CPU) interrupt.s
+	$(CC65)/ca65 --cpu $(CPU) $<
 
 vectors.o: vectors.s
-	$(CC65)/ca65 --cpu $(CPU) vectors.s
+	$(CC65)/ca65 --cpu $(CPU) $<
 
 crt0.o: crt0.s
-	$(CC65)/ca65 --cpu $(CPU) crt0.s
+	$(CC65)/ca65 --cpu $(CPU) $<
 
 $(LIB): crt0.o supervision.lib
 	cp supervision.lib tmp.lib
