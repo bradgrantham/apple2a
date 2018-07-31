@@ -1,8 +1,7 @@
+#include "platform.h"
+
 char *title = "Apple IIa";
 unsigned char title_length = 9;
-
-volatile unsigned char *text_page1_base = (unsigned char *)0x400;
-volatile unsigned char *text_page2_base = (unsigned char *)0x800;
 
 /**
  * Delay for a count of "t". 8000 is about one second.
@@ -17,7 +16,7 @@ static void delay(int t) {
  * Clear the screen with non-reversed spaces.
  */
 static void home() {
-    volatile unsigned char *p = text_page1_base;
+    volatile unsigned char *p = TEXT_PAGE1_BASE;
     unsigned char ch = ' ' | 0x80;
     int i;
 
@@ -31,7 +30,7 @@ int main(void)
 {
     int offset = (40 - title_length) / 2;
 
-    volatile unsigned char *loc = text_page1_base + offset;
+    volatile unsigned char *loc = TEXT_PAGE1_BASE + offset;
 
     int i;
 
@@ -43,15 +42,23 @@ int main(void)
     }
 
     // Prompt.
-    loc = text_page1_base + (40 + 40 + 48)*2;
+    loc = TEXT_PAGE1_BASE + (40 + 40 + 48)*2;
     *loc++ = ']' | 0x80;
 
     // Cursor.
+    i = 1;
     while(1) {
         *loc = 127 | 0x80;
         delay(2500);
         *loc = ' ' | 0x80;
         delay(2500);
+
+        while(keyboard_test()) {
+            unsigned char key;
+
+            key = keyboard_get();
+            loc[i++] = key | 0x80;
+        }
     }
 
     return 0;
