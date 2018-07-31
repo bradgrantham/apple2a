@@ -19,6 +19,7 @@ run: $(ROM)
 
 a.out: main.o interrupt.o vectors.o platform.o apple2rom.cfg $(LIB)
 	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o platform.o main.o $(LIB)
+	awk -f rom_usage.awk < main.map
 
 clean:
 	rm -f *.o *.lst a.out platform.s main.s $(LIB) tmp.lib
