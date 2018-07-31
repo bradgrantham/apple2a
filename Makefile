@@ -1,16 +1,27 @@
-CC65    ?=       $(HOME)/trees/cc65/bin/
+ifeq ($(USER),lk)
+	TREES   ?=       $(HOME)/others
+else
+	TREES   ?=       $(HOME)/trees
+endif
+
+CC65	?=	$(TREES)/cc65/bin
+APPLE2E	?=	$(TREES)/apple2e/apple2e
 
 CPU     =       6502
+ROM	= 	apple2a.rom
+LIB	=	apple2rom.lib
 
-apple2a.rom: a.out
-	(dd count=5 bs=4096 if=/dev/zero ; cat a.out) > apple2a.rom
+$(ROM): a.out
+	(dd count=5 bs=4096 if=/dev/zero 2> /dev/null; cat a.out) > $(ROM)
 
+run: $(ROM)
+	$(APPLE2E) $(ROM)
 
-a.out: main.o interrupt.o vectors.o apple2rom.cfg apple2rom.lib
-	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o main.o apple2rom.lib
+a.out: main.o interrupt.o vectors.o apple2rom.cfg $(LIB)
+	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o main.o $(LIB)
 
 clean:
-	rm *.o a.out main.s
+	rm -f *.o a.out main.s $(LIB) tmp.lib
 
 main.s: main.c
 	$(CC65)/cc65 -t none -O --cpu $(CPU) main.c
@@ -27,6 +38,7 @@ vectors.o: vectors.s
 crt0.o: crt0.s
 	$(CC65)/ca65 --cpu $(CPU) crt0.s
 
-apple2rom.lib: crt0.o supervision.lib
-	cp supervision.lib apple2rom.lib
-	../cc65/bin/ar65 a apple2rom.lib crt0.o
+$(LIB): crt0.o supervision.lib
+	cp supervision.lib tmp.lib
+	$(CC65)/ar65 a tmp.lib crt0.o
+	mv tmp.lib $(LIB)

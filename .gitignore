@@ -1,0 +1,8 @@
+tmp.lib
+main.s
+*.o
+*.dbg
+*.map
+*.rom
+a.out
+apple2rom.lib
