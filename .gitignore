@@ -6,4 +6,5 @@ platform.s
 *.map
 *.rom
 a.out
+*.lst
 apple2rom.lib
