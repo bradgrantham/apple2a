@@ -14,6 +14,13 @@ unsigned int cursor_y = 0;
 unsigned int showing_cursor = 0;
 // Character at the cursor location.
 unsigned char cursor_ch = 0;
+unsigned char input_buffer[40];
+int input_buffer_length = 0;
+
+// Compiled binary.
+char binary[10];
+int binary_length = 0;
+void (*binary_function)() = (void (*)()) binary;
 
 /**
  * Delay for a count of "t". 8000 is about one second.
@@ -21,20 +28,6 @@ unsigned char cursor_ch = 0;
 static void delay(int t) {
     while (t >= 0) {
         t--;
-    }
-}
-
-/**
- * Clear the screen with non-reversed spaces.
- */
-static void home() {
-    volatile unsigned char *p = TEXT_PAGE1_BASE;
-    unsigned char ch = ' ' | 0x80;
-    int i;
-
-    // TODO: Could write these as words, not chars.
-    for (i = SCREEN_STRIDE*8; i >= 0; i--) {
-        *p++ = ch;
     }
 }
 
@@ -81,16 +74,112 @@ static void move_cursor(int x, int y) {
     cursor_y = y;
 }
 
+/**
+ * Clear the screen with non-reversed spaces.
+ */
+static void home() {
+    volatile unsigned char *p = TEXT_PAGE1_BASE;
+    unsigned char ch = ' ' | 0x80;
+    int i;
+
+    // TODO: Could write these as words, not chars.
+    for (i = SCREEN_STRIDE*8; i >= 0; i--) {
+        *p++ = ch;
+    }
+
+    move_cursor(0, 0);
+}
+
+/**
+ * Print a string at the cursor.
+ */
+static void print(unsigned char *s) {
+    volatile unsigned char *loc = cursor_pos();
+
+    while (*s != '\0') {
+        if (*s == '\n') {
+            // TODO: Scroll.
+            move_cursor(0, cursor_y + 1);
+        } else {
+            *loc = *s | 0x80;
+            move_cursor(cursor_x + 1, cursor_y);
+        }
+        loc = cursor_pos();
+        s += 1;
+    }
+}
+
+/**
+ * Returns whether the two strings are equal.
+ */
+static int strings_equal(unsigned char *a, unsigned char *b) {
+    while (*a != '\0' || *b != '\0') {
+        if (*a != *b) {
+            return 0;
+        }
+
+        a += 1;
+        b += 1;
+    }
+
+    return 1;
+}
+
+/**
+ * Display a syntax error message.
+ */
+static void syntax_error() {
+    print("\n?SYNTAX ERROR\n");
+}
+
+/**
+ * Add a function call to the binary buffer.
+ */
+static void add_call(void (*function)(void)) {
+    unsigned int addr = (int) function;
+
+    binary[binary_length++] = 0x20;  // JSR
+    binary[binary_length++] = addr & 0xFF;
+    binary[binary_length++] = addr >> 8;
+}
+
+/**
+ * Add a function return to the binary buffer.
+ */
+static void add_return() {
+    binary[binary_length++] = 0x60;  // RTS
+}
+
+/**
+ * Process the user's line of input, possibly compiling the code.
+ * and executing it.
+ */
+static void process_input_buffer() {
+    input_buffer[input_buffer_length] = '\0';
+
+    // Compile the line of BASIC.
+    binary_length = 0;
+    if (strings_equal(input_buffer, "HOME")) {
+        add_call(home);
+    } else {
+        add_call(syntax_error);
+    }
+
+    // Return from function.
+    add_return();
+
+    // Call it.
+    binary_function();
+}
+
 int main(void)
 {
-    int offset = (40 - title_length) / 2;
-
-    volatile unsigned char *loc = TEXT_PAGE1_BASE + offset;
-
+    volatile unsigned char *loc;
     int i;
 
     home();
 
+    /*
     // Display the character set.
     for (i = 0; i < 256; i++) {
         // Fails with: unhandled instruction B2
@@ -101,21 +190,19 @@ int main(void)
         *loc = i;
     }
     while(1);
+    */
 
 
     // Title.
-    for(i = 0; i < title_length; i++) {
-        loc[i] = title[i] | 0x80;
-    }
+    move_cursor((40 - title_length) / 2, 0);
+    print(title);
 
     // Prompt.
-    move_cursor(0, 2);
-    loc = cursor_pos();
-    *loc = ']' | 0x80;
-    move_cursor(cursor_x + 1, cursor_y);
+    print("\n\n]");
 
     // Keyboard input.
     i = 0;
+    input_buffer_length = 0;
     show_cursor();
     while(1) {
         // Blink cursor.
@@ -138,19 +225,26 @@ int main(void)
                 key = keyboard_get();
                 if (key == 8) {
                     // Backspace.
-                    if (cursor_x > 1) {
+                    if (input_buffer_length > 0) {
                         move_cursor(cursor_x - 1, cursor_y);
+                        input_buffer_length -= 1;
                     }
                 } else if (key == 13) {
                     // Return.
                     move_cursor(0, cursor_y + 1);
-                    loc = cursor_pos();
-                    *loc = ']' | 0x80;
-                    move_cursor(cursor_x + 1, cursor_y);
+
+                    process_input_buffer();
+
+                    print("]");
+                    input_buffer_length = 0;
                 } else {
-                    volatile unsigned char *loc = cursor_pos();
-                    *loc = key | 0x80;
-                    move_cursor(cursor_x + 1, cursor_y);
+                    if (input_buffer_length < sizeof(input_buffer) - 1) {
+                        volatile unsigned char *loc = cursor_pos();
+                        *loc = key | 0x80;
+                        move_cursor(cursor_x + 1, cursor_y);
+
+                        input_buffer[input_buffer_length++] = key;
+                    }
                 }
             }
 
