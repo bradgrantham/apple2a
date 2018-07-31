@@ -3,6 +3,18 @@
 char *title = "Apple IIa";
 unsigned char title_length = 9;
 
+#define CURSOR_GLYPH 127
+#define SCREEN_WIDTH 40
+#define SCREEN_STRIDE (3*SCREEN_WIDTH + 8)
+
+// Location of cursor in logical screen space.
+unsigned int cursor_x = 0;
+unsigned int cursor_y = 0;
+// Whether the cursor is being displayed.
+unsigned int showing_cursor = 0;
+// Character at the cursor location.
+unsigned char cursor_ch = 0;
+
 /**
  * Delay for a count of "t". 8000 is about one second.
  */
@@ -21,9 +33,52 @@ static void home() {
     int i;
 
     // TODO: Could write these as words, not chars.
-    for (i = (40 + 40 + 48)*8; i >= 0; i--) {
+    for (i = SCREEN_STRIDE*8; i >= 0; i--) {
         *p++ = ch;
     }
+}
+
+/**
+ * Return the memory location of the cursor.
+ */
+static volatile unsigned char *cursor_pos() {
+    int block = cursor_y >> 3;
+    int line = cursor_y & 0x07;
+
+    return TEXT_PAGE1_BASE + line*SCREEN_STRIDE + block*SCREEN_WIDTH + cursor_x;
+}
+
+/**
+ * Shows the cursor. Safe to call if it's already showing.
+ */
+static void show_cursor() {
+    if (!showing_cursor) {
+        volatile unsigned char *pos = cursor_pos();
+        cursor_ch = *pos;
+        *pos = CURSOR_GLYPH | 0x80;
+        showing_cursor = 1;
+    }
+}
+
+/**
+ * Hides the cursor. Safe to call if it's not already shown.
+ */
+static void hide_cursor() {
+    if (showing_cursor) {
+        volatile unsigned char *pos = cursor_pos();
+        *pos = cursor_ch;
+        showing_cursor = 0;
+    }
+}
+
+/**
+ * Moves the cursor to the specified location, where X
+ * is 0 to 39 inclusive, Y is 0 to 23 inclusive.
+ */
+static void move_cursor(int x, int y) {
+    hide_cursor();
+    cursor_x = x;
+    cursor_y = y;
 }
 
 int main(void)
@@ -42,22 +97,52 @@ int main(void)
     }
 
     // Prompt.
-    loc = TEXT_PAGE1_BASE + (40 + 40 + 48)*2;
-    *loc++ = ']' | 0x80;
+    move_cursor(0, 2);
+    loc = cursor_pos();
+    *loc = ']' | 0x80;
+    move_cursor(cursor_x + 1, cursor_y);
 
-    // Cursor.
-    i = 1;
+    // Keyboard input.
+    i = 0;
+    show_cursor();
     while(1) {
-        *loc = 127 | 0x80;
-        delay(2500);
-        *loc = ' ' | 0x80;
-        delay(2500);
+        // Blink cursor.
+        i += 1;
+        if (i == 2000) {
+            if (showing_cursor) {
+                hide_cursor();
+            } else {
+                show_cursor();
+            }
+            i = 0;
+        }
 
-        while(keyboard_test()) {
-            unsigned char key;
+        if(keyboard_test()) {
+            hide_cursor();
 
-            key = keyboard_get();
-            loc[i++] = key | 0x80;
+            while(keyboard_test()) {
+                unsigned char key;
+
+                key = keyboard_get();
+                if (key == 8) {
+                    // Backspace.
+                    if (cursor_x > 1) {
+                        move_cursor(cursor_x - 1, cursor_y);
+                    }
+                } else if (key == 13) {
+                    // Return.
+                    move_cursor(0, cursor_y + 1);
+                    loc = cursor_pos();
+                    *loc = ']' | 0x80;
+                    move_cursor(cursor_x + 1, cursor_y);
+                } else {
+                    volatile unsigned char *loc = cursor_pos();
+                    *loc = key | 0x80;
+                    move_cursor(cursor_x + 1, cursor_y);
+                }
+            }
+
+            show_cursor();
         }
     }
 
