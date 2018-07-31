@@ -91,6 +91,18 @@ int main(void)
 
     home();
 
+    // Display the character set.
+    for (i = 0; i < 256; i++) {
+        // Fails with: unhandled instruction B2
+        move_cursor(i % 16, i >> 4);
+        // Works.
+        // move_cursor(i & 0x0F, i >> 4);
+        loc = cursor_pos();
+        *loc = i;
+    }
+    while(1);
+
+
     // Title.
     for(i = 0; i < title_length; i++) {
         loc[i] = title[i] | 0x80;
