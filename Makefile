@@ -17,8 +17,8 @@ $(ROM): a.out
 run: $(ROM)
 	$(APPLE2E) $(ROM)
 
-a.out: main.o interrupt.o vectors.o apple2rom.cfg $(LIB)
-	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o main.o $(LIB)
+a.out: main.o interrupt.o vectors.o platform.o apple2rom.cfg $(LIB)
+	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o platform.o main.o $(LIB)
 
 clean:
 	rm -f *.o a.out main.s $(LIB) tmp.lib
@@ -28,6 +28,13 @@ main.s: main.c
 
 main.o: main.s
 	$(CC65)/ca65 --cpu $(CPU) main.s
+
+# platform.c contains inline assembly and code that must not be optimized
+platform.s: platform.c
+	$(CC65)/cc65 -t none --cpu $(CPU) platform.c
+
+platform.o: platform.s
+	$(CC65)/ca65 --cpu $(CPU) platform.s
 
 interrupt.o: interrupt.s
 	$(CC65)/ca65 --cpu $(CPU) interrupt.s
