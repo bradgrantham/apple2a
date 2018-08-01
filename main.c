@@ -28,9 +28,9 @@ unsigned char input_buffer[40];
 int input_buffer_length = 0;
 
 // Compiled binary.
-char binary[128];
-int binary_length = 0;
-void (*binary_function)() = (void (*)()) binary;
+char compiled[128];
+int compiled_length = 0;
+void (*compiled_function)() = (void (*)()) compiled;
 
 /**
  * Return the memory location of the cursor.
@@ -147,21 +147,21 @@ static void syntax_error() {
 }
 
 /**
- * Add a function call to the binary buffer.
+ * Add a function call to the compiled buffer.
  */
 static void add_call(void (*function)(void)) {
     unsigned int addr = (int) function;
 
-    binary[binary_length++] = 0x20;  // JSR
-    binary[binary_length++] = addr & 0xFF;
-    binary[binary_length++] = addr >> 8;
+    compiled[compiled_length++] = 0x20;  // JSR
+    compiled[compiled_length++] = addr & 0xFF;
+    compiled[compiled_length++] = addr >> 8;
 }
 
 /**
- * Add a function return to the binary buffer.
+ * Add a function return to the compiled buffer.
  */
 static void add_return() {
-    binary[binary_length++] = 0x60;  // RTS
+    compiled[compiled_length++] = 0x60;  // RTS
 }
 
 /**
@@ -266,12 +266,12 @@ static void process_input_buffer() {
     s = input_buffer;
 
     // Compile the line of BASIC.
-    binary_length = 0;
+    compiled_length = 0;
 
     do {
         char error = 0;
 
-        // Default to being done after one command.
+        // Default to being done after one statement.
         done = 1;
 
         if (*s == '\0' || *s == ':') {
@@ -310,12 +310,12 @@ static void process_input_buffer() {
     // Return from function.
     add_return();
 
-    if (binary_length > sizeof(binary)) {
+    if (compiled_length > sizeof(compiled)) {
         // TODO: Check while adding bytes, not at the end.
         print("\n?Binary length exceeded");
     } else {
         // Call it.
-        binary_function();
+        compiled_function();
     }
 }
 
