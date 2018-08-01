@@ -109,6 +109,10 @@ static void print(unsigned char *s) {
     }
 }
 
+static void print_statement() {
+    print("Hello world!\n");
+}
+
 /**
  * If a starts with string b, returns the position in a after b. Else returns null.
  */
@@ -175,7 +179,7 @@ static void process_input_buffer() {
     char done;
 
     input_buffer[input_buffer_length] = '\0';
-    s = skip_whitespace(input_buffer);
+    s = input_buffer;
 
     // Compile the line of BASIC.
     binary_length = 0;
@@ -186,25 +190,32 @@ static void process_input_buffer() {
         // Default to being done after one command.
         done = 1;
 
-        if (*s == '\0') {
-            // Nothing.
+        s = skip_whitespace(s);
+        if (*s == '\0' || *s == ':') {
+            // Empty statement.
         } else if ((after = skip_over(s, "HOME")) != 0) {
+            s = after;
             add_call(home);
+        } else if ((after = skip_over(s, "PRINT")) != 0) {
+            s = after;
+
+            // TODO: Parse expression.
+            add_call(print_statement);
         } else {
             error = 1;
         }
 
-        // Now we're at the end of our instruction.
+        // Now we're at the end of our statement.
         if (!error) {
-            s = skip_whitespace(after);
+            s = skip_whitespace(s);
             if (*s == ':') {
                 // Skip colon.
                 s += 1;
 
-                // Next instruction.
+                // Next statement.
                 done = 0;
             } else if (*s != '\0') {
-                // Junk at the end of the instruction.
+                // Junk at the end of the statement.
                 error = 1;
             }
         }
