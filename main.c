@@ -18,39 +18,39 @@ static unsigned char *TOKEN[] = {
 static int TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
 // Location of cursor in logical screen space.
-unsigned int cursor_x = 0;
-unsigned int cursor_y = 0;
+unsigned int g_cursor_x = 0;
+unsigned int g_cursor_y = 0;
 // Whether the cursor is being displayed.
-unsigned int showing_cursor = 0;
+unsigned int g_showing_cursor = 0;
 // Character at the cursor location.
-unsigned char cursor_ch = 0;
-unsigned char input_buffer[40];
-int input_buffer_length = 0;
+unsigned char g_cursor_ch = 0;
+unsigned char g_input_buffer[40];
+int g_input_buffer_length = 0;
 
 // Compiled binary.
-char compiled[128];
-int compiled_length = 0;
-void (*compiled_function)() = (void (*)()) compiled;
+char g_compiled[128];
+int g_compiled_length = 0;
+void (*g_compiled_function)() = (void (*)()) g_compiled;
 
 /**
  * Return the memory location of the cursor.
  */
 static volatile unsigned char *cursor_pos() {
-    int block = cursor_y >> 3;
-    int line = cursor_y & 0x07;
+    int block = g_cursor_y >> 3;
+    int line = g_cursor_y & 0x07;
 
-    return TEXT_PAGE1_BASE + line*SCREEN_STRIDE + block*SCREEN_WIDTH + cursor_x;
+    return TEXT_PAGE1_BASE + line*SCREEN_STRIDE + block*SCREEN_WIDTH + g_cursor_x;
 }
 
 /**
  * Shows the cursor. Safe to call if it's already showing.
  */
 static void show_cursor() {
-    if (!showing_cursor) {
+    if (!g_showing_cursor) {
         volatile unsigned char *pos = cursor_pos();
-        cursor_ch = *pos;
+        g_cursor_ch = *pos;
         *pos = CURSOR_GLYPH | 0x80;
-        showing_cursor = 1;
+        g_showing_cursor = 1;
     }
 }
 
@@ -58,10 +58,10 @@ static void show_cursor() {
  * Hides the cursor. Safe to call if it's not already shown.
  */
 static void hide_cursor() {
-    if (showing_cursor) {
+    if (g_showing_cursor) {
         volatile unsigned char *pos = cursor_pos();
-        *pos = cursor_ch;
-        showing_cursor = 0;
+        *pos = g_cursor_ch;
+        g_showing_cursor = 0;
     }
 }
 
@@ -71,8 +71,8 @@ static void hide_cursor() {
  */
 static void move_cursor(int x, int y) {
     hide_cursor();
-    cursor_x = x;
-    cursor_y = y;
+    g_cursor_x = x;
+    g_cursor_y = y;
 }
 
 /**
@@ -99,11 +99,11 @@ static void print_char(unsigned char c) {
 
     if (c == '\n') {
         // TODO: Scroll.
-        move_cursor(0, cursor_y + 1);
+        move_cursor(0, g_cursor_y + 1);
     } else {
         // Print character.
         *loc = c | 0x80;
-        move_cursor(cursor_x + 1, cursor_y);
+        move_cursor(g_cursor_x + 1, g_cursor_y);
     }
 }
 
@@ -152,16 +152,16 @@ static void syntax_error() {
 static void add_call(void (*function)(void)) {
     unsigned int addr = (int) function;
 
-    compiled[compiled_length++] = 0x20;  // JSR
-    compiled[compiled_length++] = addr & 0xFF;
-    compiled[compiled_length++] = addr >> 8;
+    g_compiled[g_compiled_length++] = 0x20;  // JSR
+    g_compiled[g_compiled_length++] = addr & 0xFF;
+    g_compiled[g_compiled_length++] = addr >> 8;
 }
 
 /**
  * Add a function return to the compiled buffer.
  */
 static void add_return() {
-    compiled[compiled_length++] = 0x60;  // RTS
+    g_compiled[g_compiled_length++] = 0x60;  // RTS
 }
 
 /**
@@ -258,15 +258,15 @@ static void process_input_buffer() {
     char done;
     unsigned int line_number;
 
-    input_buffer[input_buffer_length] = '\0';
+    g_input_buffer[g_input_buffer_length] = '\0';
 
     // Tokenize in-place.
-    line_number = tokenize(input_buffer);
+    line_number = tokenize(g_input_buffer);
 
-    s = input_buffer;
+    s = g_input_buffer;
 
     // Compile the line of BASIC.
-    compiled_length = 0;
+    g_compiled_length = 0;
 
     do {
         char error = 0;
@@ -310,12 +310,12 @@ static void process_input_buffer() {
     // Return from function.
     add_return();
 
-    if (compiled_length > sizeof(compiled)) {
+    if (g_compiled_length > sizeof(g_compiled)) {
         // TODO: Check while adding bytes, not at the end.
         print("\n?Binary length exceeded");
     } else {
         // Call it.
-        compiled_function();
+        g_compiled_function();
     }
 }
 
@@ -349,13 +349,13 @@ int main(void)
 
     // Keyboard input.
     i = 0;
-    input_buffer_length = 0;
+    g_input_buffer_length = 0;
     show_cursor();
     while(1) {
         // Blink cursor.
         i += 1;
         if (i == 3000) {
-            if (showing_cursor) {
+            if (g_showing_cursor) {
                 hide_cursor();
             } else {
                 show_cursor();
@@ -372,25 +372,25 @@ int main(void)
                 key = keyboard_get();
                 if (key == 8) {
                     // Backspace.
-                    if (input_buffer_length > 0) {
-                        move_cursor(cursor_x - 1, cursor_y);
-                        input_buffer_length -= 1;
+                    if (g_input_buffer_length > 0) {
+                        move_cursor(g_cursor_x - 1, g_cursor_y);
+                        g_input_buffer_length -= 1;
                     }
                 } else if (key == 13) {
                     // Return.
-                    move_cursor(0, cursor_y + 1);
+                    move_cursor(0, g_cursor_y + 1);
 
                     process_input_buffer();
 
                     print("\n]");
-                    input_buffer_length = 0;
+                    g_input_buffer_length = 0;
                 } else {
-                    if (input_buffer_length < sizeof(input_buffer) - 1) {
+                    if (g_input_buffer_length < sizeof(g_input_buffer) - 1) {
                         volatile unsigned char *loc = cursor_pos();
                         *loc = key | 0x80;
-                        move_cursor(cursor_x + 1, cursor_y);
+                        move_cursor(g_cursor_x + 1, g_cursor_y);
 
-                        input_buffer[input_buffer_length++] = key;
+                        g_input_buffer[g_input_buffer_length++] = key;
                     }
                 }
             }
