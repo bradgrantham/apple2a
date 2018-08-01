@@ -1,7 +1,7 @@
 #include "platform.h"
 
-char *title = "Apple IIa";
-unsigned char title_length = 9;
+uint8_t *title = "Apple IIa";
+uint8_t title_length = 9;
 
 #define CURSOR_GLYPH 127
 #define SCREEN_WIDTH 40
@@ -12,26 +12,26 @@ unsigned char title_length = 9;
 #define T_LIST 0x82
 
 // List of tokens. The token value is the index plus 0x80.
-static unsigned char *TOKEN[] = {
+static uint8_t *TOKEN[] = {
     "HOME",
     "PRINT",
     "LIST",
 };
-static int TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
+static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
 // Location of cursor in logical screen space.
-unsigned int g_cursor_x = 0;
-unsigned int g_cursor_y = 0;
+uint16_t g_cursor_x = 0;
+uint16_t g_cursor_y = 0;
 // Whether the cursor is being displayed.
-unsigned int g_showing_cursor = 0;
+uint16_t g_showing_cursor = 0;
 // Character at the cursor location.
-unsigned char g_cursor_ch = 0;
-unsigned char g_input_buffer[40];
-int g_input_buffer_length = 0;
+uint8_t g_cursor_ch = 0;
+uint8_t g_input_buffer[40];
+int16_t g_input_buffer_length = 0;
 
 // Compiled binary.
-unsigned char g_compiled[128];
-int g_compiled_length = 0;
+uint8_t g_compiled[128];
+int16_t g_compiled_length = 0;
 void (*g_compiled_function)() = (void (*)()) g_compiled;
 
 // Stored program. Each line is:
@@ -39,15 +39,15 @@ void (*g_compiled_function)() = (void (*)()) g_compiled;
 // - Two bytes for line number.
 // - Program line.
 // - Nul.
-unsigned char g_program[1024];
-unsigned char *g_program_head;
+uint8_t g_program[1024];
+uint8_t *g_program_head;
 
 /**
  * Return the memory location of the cursor.
  */
-static volatile unsigned char *cursor_pos() {
-    int block = g_cursor_y >> 3;
-    int line = g_cursor_y & 0x07;
+static volatile uint8_t *cursor_pos() {
+    int16_t block = g_cursor_y >> 3;
+    int16_t line = g_cursor_y & 0x07;
 
     return TEXT_PAGE1_BASE + line*SCREEN_STRIDE + block*SCREEN_WIDTH + g_cursor_x;
 }
@@ -57,7 +57,7 @@ static volatile unsigned char *cursor_pos() {
  */
 static void show_cursor() {
     if (!g_showing_cursor) {
-        volatile unsigned char *pos = cursor_pos();
+        volatile uint8_t *pos = cursor_pos();
         g_cursor_ch = *pos;
         *pos = CURSOR_GLYPH | 0x80;
         g_showing_cursor = 1;
@@ -69,7 +69,7 @@ static void show_cursor() {
  */
 static void hide_cursor() {
     if (g_showing_cursor) {
-        volatile unsigned char *pos = cursor_pos();
+        volatile uint8_t *pos = cursor_pos();
         *pos = g_cursor_ch;
         g_showing_cursor = 0;
     }
@@ -79,7 +79,7 @@ static void hide_cursor() {
  * Moves the cursor to the specified location, where X
  * is 0 to 39 inclusive, Y is 0 to 23 inclusive.
  */
-static void move_cursor(int x, int y) {
+static void move_cursor(int16_t x, int16_t y) {
     hide_cursor();
     g_cursor_x = x;
     g_cursor_y = y;
@@ -89,9 +89,9 @@ static void move_cursor(int x, int y) {
  * Clear the screen with non-reversed spaces.
  */
 static void home() {
-    volatile unsigned char *p = TEXT_PAGE1_BASE;
-    unsigned char ch = ' ' | 0x80;
-    int i;
+    volatile uint8_t *p = TEXT_PAGE1_BASE;
+    uint8_t ch = ' ' | 0x80;
+    int16_t i;
 
     // TODO: Could write these as words, not chars.
     for (i = SCREEN_STRIDE*8; i >= 0; i--) {
@@ -104,8 +104,8 @@ static void home() {
 /**
  * Prints the character and advances the cursor. Handles newlines.
  */
-static void print_char(unsigned char c) {
-    volatile unsigned char *loc = cursor_pos();
+static void print_char(uint8_t c) {
+    volatile uint8_t *loc = cursor_pos();
 
     if (c == '\n') {
         // TODO: Scroll.
@@ -120,36 +120,36 @@ static void print_char(unsigned char c) {
 /**
  * Print a string at the cursor.
  */
-static void print(unsigned char *s) {
+static void print(uint8_t *s) {
     while (*s != '\0') {
         print_char(*s++);
     }
 }
 
 /**
- * Print an unsigned integer.
+ * Print an uint16_teger.
  */
-static void print_int(unsigned int i) {
+static void print_int(uint16_t i) {
     // Is this the best way to do this? I've seen it done backwards, where
     // digits are added to a buffer least significant digit first, then reversed,
     // but this seems faster.
     if (i >= 10000) {
-        int r = i / 10000;
+        int16_t r = i / 10000;
         print_char('0' + r);
         i -= r*10000;
     }
     if (i >= 1000) {
-        int r = i / 1000;
+        int16_t r = i / 1000;
         print_char('0' + r);
         i -= r*1000;
     }
     if (i >= 100) {
-        int r = i / 100;
+        int16_t r = i / 100;
         print_char('0' + r);
         i -= r*100;
     }
     if (i >= 10) {
-        int r = i / 10;
+        int16_t r = i / 10;
         print_char('0' + r);
         i -= r*10;
     }
@@ -159,7 +159,7 @@ static void print_int(unsigned int i) {
 /**
  * Copy a memory buffer. Source and destination must not overlap.
  */
-static void memcpy(unsigned char *dest, unsigned char *src, int count) {
+static void memcpy(uint8_t *dest, uint8_t *src, int16_t count) {
     while (count-- > 0) {
         *dest++ = *src++;
     }
@@ -168,8 +168,8 @@ static void memcpy(unsigned char *dest, unsigned char *src, int count) {
 /**
  * Get the length of a nul-terminated string.
  */
-static int strlen(unsigned char *s) {
-    unsigned char *original = s;
+static int16_t strlen(uint8_t *s) {
+    uint8_t *original = s;
 
     while (*s != '\0') {
         s += 1;
@@ -182,7 +182,7 @@ static int strlen(unsigned char *s) {
  * Print the tokenized string, with tokens displayed as their full text.
  * Prints a newline at the end.
  */
-static void print_detokenized(unsigned char *s) {
+static void print_detokenized(uint8_t *s) {
     while (*s != '\0') {
         if (*s >= 0x80) {
             print_char(' ');
@@ -202,15 +202,15 @@ static void print_detokenized(unsigned char *s) {
  * Get the pointer to the next line in the stored program. Returns 0
  * if we're at the end.
  */
-static unsigned char *get_next_line(unsigned char *line) {
-    return *((unsigned char **) line);
+static uint8_t *get_next_line(uint8_t *line) {
+    return *((uint8_t **) line);
 }
 
 /**
  * Get the line number of a stored program line.
  */
-static unsigned int get_line_number(unsigned char *line) {
-    return *((unsigned int *) (line + 2));
+static uint16_t get_line_number(uint8_t *line) {
+    return *((uint16_t *) (line + 2));
 }
 
 /**
@@ -220,7 +220,7 @@ static unsigned int get_line_number(unsigned char *line) {
  * an optional starting point, to use as an optimization instead of starting
  * from the beginning.
  */
-static unsigned char *get_end_of_program(unsigned char *line) {
+static uint8_t *get_end_of_program(uint8_t *line) {
     if (g_program_head == 0) {
         // No program.
         return g_program;
@@ -231,7 +231,7 @@ static unsigned char *get_end_of_program(unsigned char *line) {
     }
 
     while (1) {
-        unsigned char *next_line = get_next_line(line);
+        uint8_t *next_line = get_next_line(line);
 
         if (next_line == 0) {
             // Last line of program.
@@ -255,7 +255,7 @@ static void print_statement() {
  * List the stored program.
  */
 static void list_statement() {
-    unsigned char *line = g_program_head;
+    uint8_t *line = g_program_head;
 
     while (line != 0) {
         print_int(get_line_number(line));
@@ -270,7 +270,7 @@ static void list_statement() {
 /**
  * If a starts with string b, returns the position in a after b. Else returns null.
  */
-static unsigned char *skip_over(unsigned char *a, unsigned char *b) {
+static uint8_t *skip_over(uint8_t *a, uint8_t *b) {
     while (*a != '\0' && *b != '\0') {
         if (*a != *b) {
             // Doesn't start with b.
@@ -297,7 +297,7 @@ static void syntax_error() {
  * Add a function call to the compiled buffer.
  */
 static void add_call(void (*function)(void)) {
-    unsigned int addr = (int) function;
+    uint16_t addr = (int16_t) function;
 
     g_compiled[g_compiled_length++] = 0x20;  // JSR
     g_compiled[g_compiled_length++] = addr & 0xFF;
@@ -315,7 +315,7 @@ static void add_return() {
  * Advance s over whitespace, which is just a space, returning
  * the new pointer.
  */
-static unsigned char *skip_whitespace(unsigned char *s) {
+static uint8_t *skip_whitespace(uint8_t *s) {
     while (*s == ' ') {
         s += 1;
     }
@@ -327,9 +327,9 @@ static unsigned char *skip_whitespace(unsigned char *s) {
  * Tokenize a string in place. Returns (and removes) any line number, or 0xFFFF
  * if there's none. The new line will be terminated by three nuls.
  */
-static unsigned int tokenize(unsigned char *s) {
-    unsigned char *t = s; // Tokenized version.
-    int line_number;
+static uint16_t tokenize(uint8_t *s) {
+    uint8_t *t = s; // Tokenized version.
+    int16_t line_number;
 
     // Parse optional line number.
     if (*s >= '0' && *s <= '9') {
@@ -349,8 +349,8 @@ static unsigned int tokenize(unsigned char *s) {
             // Skip spaces.
             s++;
         } else {
-            int i;
-            unsigned char *skipped = 0;
+            int16_t i;
+            uint8_t *skipped = 0;
 
             for (i = 0; i < TOKEN_COUNT; i++) {
                 skipped = skip_over(s, TOKEN[i]);
@@ -384,8 +384,8 @@ static unsigned int tokenize(unsigned char *s) {
  * a pointer to it. If the line does not exist, returns a pointer to
  * the previous line.
  */
-static unsigned char *find_line(unsigned int line_number) {
-    unsigned char *line;
+static uint8_t *find_line(uint16_t line_number) {
+    uint8_t *line;
 
     if (g_program_head == 0) {
         // No program.
@@ -395,7 +395,7 @@ static unsigned char *find_line(unsigned int line_number) {
     line = g_program_head;
 
     while (1) {
-        unsigned char *next_line;
+        uint8_t *next_line;
 
         // See if we hit it.
         if (get_line_number(line) == line_number) {
@@ -418,9 +418,9 @@ static unsigned char *find_line(unsigned int line_number) {
  * and executing it.
  */
 static void process_input_buffer() {
-    unsigned char *s; // Where we are in the buffer.
-    char done;
-    unsigned int line_number;
+    uint8_t *s; // Where we are in the buffer.
+    int8_t done;
+    uint16_t line_number;
 
     g_input_buffer[g_input_buffer_length] = '\0';
 
@@ -434,7 +434,7 @@ static void process_input_buffer() {
         g_compiled_length = 0;
 
         do {
-            char error = 0;
+            int8_t error = 0;
 
             // Default to being done after one statement.
             done = 1;
@@ -486,7 +486,7 @@ static void process_input_buffer() {
             g_compiled_function();
         }
     } else {
-        unsigned char *line = find_line(line_number);
+        uint8_t *line = find_line(line_number);
 
         // Stored mode. Add line to program.
         if (line == 0) {
@@ -520,9 +520,9 @@ static void process_input_buffer() {
     }
 }
 
-int main(void)
+int16_t main(void)
 {
-    int blink;
+    int16_t blink;
 
     // Initialize variables.
     g_program_head = 0;
@@ -532,9 +532,9 @@ int main(void)
 
     // Display the character set.
     if (0) {
-        int i;
+        int16_t i;
         for (i = 0; i < 256; i++) {
-            volatile unsigned char *loc;
+            volatile uint8_t *loc;
             // Fails with: unhandled instruction B2
             move_cursor(i % 16, i >> 4);
             // Works.
@@ -572,7 +572,7 @@ int main(void)
             hide_cursor();
 
             while(keyboard_test()) {
-                unsigned char key;
+                uint8_t key;
 
                 key = keyboard_get();
                 if (key == 8) {
@@ -591,7 +591,7 @@ int main(void)
                     g_input_buffer_length = 0;
                 } else {
                     if (g_input_buffer_length < sizeof(g_input_buffer) - 1) {
-                        volatile unsigned char *loc = cursor_pos();
+                        volatile uint8_t *loc = cursor_pos();
                         *loc = key | 0x80;
                         move_cursor(g_cursor_x + 1, g_cursor_y);
 
