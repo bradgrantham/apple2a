@@ -9,11 +9,13 @@ unsigned char title_length = 9;
 
 #define T_HOME 0x80
 #define T_PRINT 0x81
+#define T_LIST 0x82
 
 // List of tokens. The token value is the index plus 0x80.
 static unsigned char *TOKEN[] = {
     "HOME",
     "PRINT",
+    "LIST",
 };
 static int TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -28,9 +30,17 @@ unsigned char g_input_buffer[40];
 int g_input_buffer_length = 0;
 
 // Compiled binary.
-char g_compiled[128];
+unsigned char g_compiled[128];
 int g_compiled_length = 0;
 void (*g_compiled_function)() = (void (*)()) g_compiled;
+
+// Stored program. Each line is:
+// - Two bytes for pointer to next line (or zero if none).
+// - Two bytes for line number.
+// - Program line.
+// - Nul.
+unsigned char g_program[1024];
+unsigned char *g_program_head;
 
 /**
  * Return the memory location of the cursor.
@@ -116,8 +126,145 @@ static void print(unsigned char *s) {
     }
 }
 
+/**
+ * Print an unsigned integer.
+ */
+static void print_int(unsigned int i) {
+    // Is this the best way to do this? I've seen it done backwards, where
+    // digits are added to a buffer least significant digit first, then reversed,
+    // but this seems faster.
+    if (i >= 10000) {
+        int r = i / 10000;
+        print_char('0' + r);
+        i -= r*10000;
+    }
+    if (i >= 1000) {
+        int r = i / 1000;
+        print_char('0' + r);
+        i -= r*1000;
+    }
+    if (i >= 100) {
+        int r = i / 100;
+        print_char('0' + r);
+        i -= r*100;
+    }
+    if (i >= 10) {
+        int r = i / 10;
+        print_char('0' + r);
+        i -= r*10;
+    }
+    print_char('0' + i);
+}
+
+/**
+ * Copy a memory buffer. Source and destination must not overlap.
+ */
+static void memcpy(unsigned char *dest, unsigned char *src, int count) {
+    while (count-- > 0) {
+        *dest++ = *src++;
+    }
+}
+
+/**
+ * Get the length of a nul-terminated string.
+ */
+static int strlen(unsigned char *s) {
+    unsigned char *original = s;
+
+    while (*s != '\0') {
+        s += 1;
+    }
+
+    return s - original;
+}
+
+/**
+ * Print the tokenized string, with tokens displayed as their full text.
+ * Prints a newline at the end.
+ */
+static void print_detokenized(unsigned char *s) {
+    while (*s != '\0') {
+        if (*s >= 0x80) {
+            print_char(' ');
+            print(TOKEN[*s - 0x80]);
+            print_char(' ');
+        } else {
+            print_char(*s);
+        }
+
+        s += 1;
+    }
+
+    print_char('\n');
+}
+
+/**
+ * Get the pointer to the next line in the stored program. Returns 0
+ * if we're at the end.
+ */
+static unsigned char *get_next_line(unsigned char *line) {
+    return *((unsigned char **) line);
+}
+
+/**
+ * Get the line number of a stored program line.
+ */
+static unsigned int get_line_number(unsigned char *line) {
+    return *((unsigned int *) (line + 2));
+}
+
+/**
+ * Return a pointer to the end of the program. This is one byte PAST the
+ * last bytes in the program, which are three nuls. If there's no program
+ * at all, returns the beginning of the program buffer. The "line" parameter is
+ * an optional starting point, to use as an optimization instead of starting
+ * from the beginning.
+ */
+static unsigned char *get_end_of_program(unsigned char *line) {
+    if (g_program_head == 0) {
+        // No program.
+        return g_program;
+    }
+
+    if (line == 0) {
+        line = g_program_head;
+    }
+
+    while (1) {
+        unsigned char *next_line = get_next_line(line);
+
+        if (next_line == 0) {
+            // Last line of program.
+
+            // Skip the line header (next pointer and line number).
+            line += 4;
+
+            // Skip the line itself and the three nuls.
+            return line + strlen(line) + 3;
+        }
+
+        line = next_line;
+    }
+}
+
 static void print_statement() {
     print("Hello world!\n");
+}
+
+/**
+ * List the stored program.
+ */
+static void list_statement() {
+    unsigned char *line = g_program_head;
+
+    while (line != 0) {
+        print_int(get_line_number(line));
+        print_char(' ');
+        print_detokenized(line + 4);
+
+        // Next line.
+        line = get_next_line(line);
+    }
 }
 
 /**
@@ -232,21 +379,38 @@ static unsigned int tokenize(unsigned char *s) {
 }
 
 /**
- * Print the tokenized string, with tokens displayed as their full text.
- * Prints a line number first if it's not 0xFFFF. Prints a newline at the end.
+ * Find the stored program line with the given line number. If there
+ * is no stored program, returns null. If the line exists, returns
+ * a pointer to it. If the line does not exist, returns a pointer to
+ * the previous line.
  */
-static void print_detokenized(unsigned int line_number, unsigned char *s) {
-    while (*s != '\0') {
-        if (*s >= 0x80) {
-            print(TOKEN[*s - 0x80]);
-        } else {
-            print_char(*s);
-        }
+static unsigned char *find_line(unsigned int line_number) {
+    unsigned char *line;
 
-        s += 1;
+    if (g_program_head == 0) {
+        // No program.
+        return 0;
     }
 
-    print_char('\n');
+    line = g_program_head;
+
+    while (1) {
+        unsigned char *next_line;
+
+        // See if we hit it.
+        if (get_line_number(line) == line_number) {
+            return line;
+        }
+
+        // See if we're at the end or if the next line is too far.
+        next_line = get_next_line(line);
+        if (next_line == 0 || get_line_number(next_line) > line_number) {
+            return line;
+        }
+
+        // Go to next line.
+        line = next_line;
+    }
 }
 
 /**
@@ -262,85 +426,126 @@ static void process_input_buffer() {
 
     // Tokenize in-place.
     line_number = tokenize(g_input_buffer);
+    if (line_number == 0xFFFF) {
+        // Immediate mode.
+        s = g_input_buffer;
 
-    s = g_input_buffer;
+        // Compile the line of BASIC.
+        g_compiled_length = 0;
 
-    // Compile the line of BASIC.
-    g_compiled_length = 0;
+        do {
+            char error = 0;
 
-    do {
-        char error = 0;
+            // Default to being done after one statement.
+            done = 1;
 
-        // Default to being done after one statement.
-        done = 1;
-
-        if (*s == '\0' || *s == ':') {
-            // Empty statement.
-        } else if (*s == T_HOME) {
-            s += 1;
-            add_call(home);
-        } else if (*s == T_PRINT) {
-            s += 1;
-
-            // TODO: Parse expression.
-            add_call(print_statement);
-        } else {
-            error = 1;
-        }
-
-        // Now we're at the end of our statement.
-        if (!error) {
-            if (*s == ':') {
-                // Skip colon.
+            if (*s == '\0' || *s == ':') {
+                // Empty statement.
+            } else if (*s == T_HOME) {
+                s += 1;
+                add_call(home);
+            } else if (*s == T_PRINT) {
                 s += 1;
 
-                // Next statement.
-                done = 0;
-            } else if (*s != '\0') {
-                // Junk at the end of the statement.
+                // TODO: Parse expression.
+                add_call(print_statement);
+            } else if (*s == T_LIST) {
+                s += 1;
+                add_call(list_statement);
+            } else {
                 error = 1;
             }
+
+            // Now we're at the end of our statement.
+            if (!error) {
+                if (*s == ':') {
+                    // Skip colon.
+                    s += 1;
+
+                    // Next statement.
+                    done = 0;
+                } else if (*s != '\0') {
+                    // Junk at the end of the statement.
+                    error = 1;
+                }
+            }
+
+            if (error) {
+                add_call(syntax_error);
+            }
+        } while (!done);
+
+        // Return from function.
+        add_return();
+
+        if (g_compiled_length > sizeof(g_compiled)) {
+            // TODO: Check while adding bytes, not at the end.
+            print("\n?Binary length exceeded");
+        } else {
+            // Call it.
+            g_compiled_function();
         }
-
-        if (error) {
-            add_call(syntax_error);
-        }
-    } while (!done);
-
-    // Return from function.
-    add_return();
-
-    if (g_compiled_length > sizeof(g_compiled)) {
-        // TODO: Check while adding bytes, not at the end.
-        print("\n?Binary length exceeded");
     } else {
-        // Call it.
-        g_compiled_function();
+        unsigned char *line = find_line(line_number);
+
+        // Stored mode. Add line to program.
+        if (line == 0) {
+            // New program. Just add line.
+            g_program_head = g_program;
+
+            // No next line.
+            g_program[0] = 0;
+            g_program[1] = 0;
+
+            // Line number.
+            g_program[2] = line_number & 0xFF;
+            g_program[3] = line_number >> 8;
+
+            // Include the three nuls.
+            memcpy(g_program + 4, g_input_buffer, strlen(g_input_buffer) + 3);
+        } else {
+            // Program exists. Insert or replace line.
+
+            if (get_line_number(line) == line_number) {
+                // Line exists. Replace or delete line.
+                if (g_input_buffer[0] == '\0') {
+                    // Empty line, delete old one.
+                } else {
+                    // Replace line.
+                }
+            } else {
+                // Line doesn't exist. Insert or append it.
+            }
+        }
     }
 }
 
 int main(void)
 {
-    int i;
+    int blink;
 
+    // Initialize variables.
+    g_program_head = 0;
+
+    // Initialize UI.
     home();
 
-    /*
     // Display the character set.
-    for (i = 0; i < 256; i++) {
-        volatile unsigned char *loc;
-        // Fails with: unhandled instruction B2
-        move_cursor(i % 16, i >> 4);
-        // Works.
-        // move_cursor(i & 0x0F, i >> 4);
-        loc = cursor_pos();
-        *loc = i;
+    if (0) {
+        int i;
+        for (i = 0; i < 256; i++) {
+            volatile unsigned char *loc;
+            // Fails with: unhandled instruction B2
+            move_cursor(i % 16, i >> 4);
+            // Works.
+            // move_cursor(i & 0x0F, i >> 4);
+            loc = cursor_pos();
+            *loc = i;
+        }
+        while(1);
     }
-    while(1);
-    */
 
-
-    // Title.
+    // Print title.
     move_cursor((40 - title_length) / 2, 0);
     print(title);
 
@@ -348,19 +553,19 @@ int main(void)
     print("\n\n]");
 
     // Keyboard input.
-    i = 0;
+    blink = 0;
     g_input_buffer_length = 0;
     show_cursor();
     while(1) {
         // Blink cursor.
-        i += 1;
-        if (i == 3000) {
+        blink += 1;
+        if (blink == 3000) {
             if (g_showing_cursor) {
                 hide_cursor();
             } else {
                 show_cursor();
             }
-            i = 0;
+            blink = 0;
         }
 
         if(keyboard_test()) {
