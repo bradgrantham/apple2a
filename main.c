@@ -40,7 +40,6 @@ void (*g_compiled_function)() = (void (*)()) g_compiled;
 // - Program line.
 // - Nul.
 uint8_t g_program[1024];
-uint8_t *g_program_head;
 
 /**
  * Return the memory location of the cursor.
@@ -127,7 +126,7 @@ static void print(uint8_t *s) {
 }
 
 /**
- * Print an uint16_teger.
+ * Print an unsigned integer.
  */
 static void print_int(uint16_t i) {
     // Is this the best way to do this? I've seen it done backwards, where
@@ -157,11 +156,22 @@ static void print_int(uint16_t i) {
 }
 
 /**
- * Copy a memory buffer. Source and destination must not overlap.
+ * Copy a memory buffer. Source and destination may overlap.
  */
-static void memcpy(uint8_t *dest, uint8_t *src, int16_t count) {
-    while (count-- > 0) {
-        *dest++ = *src++;
+static void memmove(uint8_t *dest, uint8_t *src, uint16_t count) {
+    // See if we overlap.
+    if (dest > src && dest < src + count) {
+        // Overlapping with src before dest, we have to copy backward.
+        dest += count;
+        src += count;
+        while (count-- > 0) {
+            *--dest = *--src;
+        }
+    } else {
+        // No overlap, or dest before src, which is fine.
+        while (count-- > 0) {
+            *dest++ = *src++;
+        }
     }
 }
 
@@ -215,36 +225,24 @@ static uint16_t get_line_number(uint8_t *line) {
 
 /**
  * Return a pointer to the end of the program. This is one byte PAST the
- * last bytes in the program, which are three nuls. If there's no program
- * at all, returns the beginning of the program buffer. The "line" parameter is
+ * last bytes in the program, which are two nuls. The "line" parameter is
  * an optional starting point, to use as an optimization instead of starting
  * from the beginning.
  */
 static uint8_t *get_end_of_program(uint8_t *line) {
-    if (g_program_head == 0) {
-        // No program.
-        return g_program;
-    }
+    uint8_t *next_line;
 
     if (line == 0) {
-        line = g_program_head;
+        // Start at the beginning if not specified.
+        line = g_program;
     }
 
-    while (1) {
-        uint8_t *next_line = get_next_line(line);
-
-        if (next_line == 0) {
-            // Last line of program.
-
-            // Skip the line header (next pointer and line number).
-            line += 4;
-
-            // Skip the line itself and the three nuls.
-            return line + strlen(line) + 3;
-        }
-
+    while ((next_line = get_next_line(line)) != 0) {
         line = next_line;
     }
+
+    // Skip the null "next" pointer.
+    return line + 2;
 }
 
 static void print_statement() {
@@ -255,15 +253,15 @@ static void print_statement() {
  * List the stored program.
  */
 static void list_statement() {
-    uint8_t *line = g_program_head;
+    uint8_t *line = g_program;
+    uint8_t *next_line;
 
-    while (line != 0) {
+    while ((next_line = get_next_line(line)) != 0) {
         print_int(get_line_number(line));
         print_char(' ');
         print_detokenized(line + 4);
 
-        // Next line.
-        line = get_next_line(line);
+        line = next_line;
     }
 }
 
@@ -379,38 +377,23 @@ static uint16_t tokenize(uint8_t *s) {
 }
 
 /**
- * Find the stored program line with the given line number. If there
- * is no stored program, returns null. If the line exists, returns
- * a pointer to it. If the line does not exist, returns a pointer to
- * the previous line.
+ * Find the stored program line with the given line number. If the line does
+ * not exist, returns a pointer to the location where it should be inserted.
  */
 static uint8_t *find_line(uint16_t line_number) {
-    uint8_t *line;
+    uint8_t *line = g_program;
+    uint8_t *next_line;
 
-    if (g_program_head == 0) {
-        // No program.
-        return 0;
-    }
-
-    line = g_program_head;
-
-    while (1) {
-        uint8_t *next_line;
-
-        // See if we hit it.
-        if (get_line_number(line) == line_number) {
-            return line;
+    while ((next_line = get_next_line(line)) != 0) {
+        // See if we hit it or just blew past it.
+        if (get_line_number(line) >= line_number) {
+            break;
         }
 
-        // See if we're at the end or if the next line is too far.
-        next_line = get_next_line(line);
-        if (next_line == 0 || get_line_number(next_line) > line_number) {
-            return line;
-        }
-
-        // Go to next line.
         line = next_line;
     }
+
+    return line;
 }
 
 /**
@@ -486,35 +469,49 @@ static void process_input_buffer() {
             g_compiled_function();
         }
     } else {
-        uint8_t *line = find_line(line_number);
-
         // Stored mode. Add line to program.
-        if (line == 0) {
-            // New program. Just add line.
-            g_program_head = g_program;
 
-            // No next line.
-            g_program[0] = 0;
-            g_program[1] = 0;
+        // Return line to replace or delete, or location to insert new line.
+        uint8_t *line = find_line(line_number);
+        uint8_t *next_line = get_next_line(line);
+
+        if (next_line == 0 || get_line_number(line) != line_number) {
+            // Didn't find line. Insert it here.
+            uint8_t *end_of_program = get_end_of_program(line);
+
+            // Next pointer, line number, line, and nul.
+            int buffer_length = strlen(g_input_buffer);
+            int line_length = 4 + buffer_length + 1;
+
+            // Shift rest of program over.
+            memmove(line + line_length, line, end_of_program - line);
+
+            // Next line. Point to yourself initially, we'll adjust below.
+            *((uint8_t **) line) = line;
 
             // Line number.
-            g_program[2] = line_number & 0xFF;
-            g_program[3] = line_number >> 8;
+            *((uint16_t *) (line + 2)) = line_number;
 
-            // Include the three nuls.
-            memcpy(g_program + 4, g_input_buffer, strlen(g_input_buffer) + 3);
+            // Buffer and nul.
+            memmove(line + 4, g_input_buffer, buffer_length + 1);
+
+            // Adjust all the next pointers.
+            while ((next_line = get_next_line(line)) != 0) {
+                // Adjust by the amount we inserted.
+                next_line += line_length;
+
+                *((uint8_t **) line) = next_line;
+                line = next_line;
+            }
         } else {
-            // Program exists. Insert or replace line.
+            // Found line.
 
-            if (get_line_number(line) == line_number) {
-                // Line exists. Replace or delete line.
-                if (g_input_buffer[0] == '\0') {
-                    // Empty line, delete old one.
-                } else {
-                    // Replace line.
-                }
+            if (g_input_buffer[0] == '\0') {
+                // Empty line, delete old one.
+                print("Deletion not handled\n");
             } else {
-                // Line doesn't exist. Insert or append it.
+                // Replace line.
+                print("Replacement not handled\n");
             }
         }
     }
@@ -524,8 +521,9 @@ int16_t main(void)
 {
     int16_t blink;
 
-    // Initialize variables.
-    g_program_head = 0;
+    // Blank program.
+    g_program[0] = '\0';
+    g_program[1] = '\0';
 
     // Initialize UI.
     home();
