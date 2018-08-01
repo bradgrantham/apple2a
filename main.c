@@ -7,6 +7,16 @@ unsigned char title_length = 9;
 #define SCREEN_WIDTH 40
 #define SCREEN_STRIDE (3*SCREEN_WIDTH + 8)
 
+#define T_HOME 0x80
+#define T_PRINT 0x81
+
+// List of tokens. The token value is the index plus 0x80.
+static unsigned char *TOKEN[] = {
+    "HOME",
+    "PRINT",
+};
+static int TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
+
 // Location of cursor in logical screen space.
 unsigned int cursor_x = 0;
 unsigned int cursor_y = 0;
@@ -21,15 +31,6 @@ int input_buffer_length = 0;
 char binary[128];
 int binary_length = 0;
 void (*binary_function)() = (void (*)()) binary;
-
-/**
- * Delay for a count of "t". 8000 is about one second.
- */
-static void delay(int t) {
-    while (t >= 0) {
-        t--;
-    }
-}
 
 /**
  * Return the memory location of the cursor.
@@ -91,21 +92,27 @@ static void home() {
 }
 
 /**
+ * Prints the character and advances the cursor. Handles newlines.
+ */
+static void print_char(unsigned char c) {
+    volatile unsigned char *loc = cursor_pos();
+
+    if (c == '\n') {
+        // TODO: Scroll.
+        move_cursor(0, cursor_y + 1);
+    } else {
+        // Print character.
+        *loc = c | 0x80;
+        move_cursor(cursor_x + 1, cursor_y);
+    }
+}
+
+/**
  * Print a string at the cursor.
  */
 static void print(unsigned char *s) {
-    volatile unsigned char *loc = cursor_pos();
-
     while (*s != '\0') {
-        if (*s == '\n') {
-            // TODO: Scroll.
-            move_cursor(0, cursor_y + 1);
-        } else {
-            *loc = *s | 0x80;
-            move_cursor(cursor_x + 1, cursor_y);
-        }
-        loc = cursor_pos();
-        s += 1;
+        print_char(*s++);
     }
 }
 
@@ -170,15 +177,92 @@ static unsigned char *skip_whitespace(unsigned char *s) {
 }
 
 /**
+ * Tokenize a string in place. Returns (and removes) any line number, or 0xFFFF
+ * if there's none. The new line will be terminated by three nuls.
+ */
+static unsigned int tokenize(unsigned char *s) {
+    unsigned char *t = s; // Tokenized version.
+    int line_number;
+
+    // Parse optional line number.
+    if (*s >= '0' && *s <= '9') {
+        line_number = 0;
+
+        while (*s >= '0' && *s <= '9') {
+            line_number = line_number*10 + (*s - '0');
+            s += 1;
+        }
+    } else {
+        line_number = 0xFFFF;
+    }
+
+    // Convert tokens.
+    while (*s != '\0') {
+        if (*s == ' ') {
+            // Skip spaces.
+            s++;
+        } else {
+            int i;
+            unsigned char *skipped = 0;
+
+            for (i = 0; i < TOKEN_COUNT; i++) {
+                skipped = skip_over(s, TOKEN[i]);
+                if (skipped != 0) {
+                    // Record token.
+                    *t++ = 0x80 + i;
+                    s = skipped;
+                    break;
+                }
+            }
+
+            if (skipped == 0) {
+                // Didn't find a token, just copy text.
+                *t++ = *s++;
+            }
+        }
+    }
+
+    // End with three nuls. The first is the end of line.
+    // The next two is the address of the next line, which is "none".
+    *t++ = '\0';
+    *t++ = '\0';
+    *t++ = '\0';
+
+    return line_number;
+}
+
+/**
+ * Print the tokenized string, with tokens displayed as their full text.
+ * Prints a line number first if it's not 0xFFFF. Prints a newline at the end.
+ */
+static void print_detokenized(unsigned int line_number, unsigned char *s) {
+    while (*s != '\0') {
+        if (*s >= 0x80) {
+            print(TOKEN[*s - 0x80]);
+        } else {
+            print_char(*s);
+        }
+
+        s += 1;
+    }
+
+    print_char('\n');
+}
+
+/**
  * Process the user's line of input, possibly compiling the code.
  * and executing it.
  */
 static void process_input_buffer() {
     unsigned char *s; // Where we are in the buffer.
-    unsigned char *after; // After skipping a token.
     char done;
+    unsigned int line_number;
 
     input_buffer[input_buffer_length] = '\0';
+
+    // Tokenize in-place.
+    line_number = tokenize(input_buffer);
+
     s = input_buffer;
 
     // Compile the line of BASIC.
@@ -190,14 +274,13 @@ static void process_input_buffer() {
         // Default to being done after one command.
         done = 1;
 
-        s = skip_whitespace(s);
         if (*s == '\0' || *s == ':') {
             // Empty statement.
-        } else if ((after = skip_over(s, "HOME")) != 0) {
-            s = after;
+        } else if (*s == T_HOME) {
+            s += 1;
             add_call(home);
-        } else if ((after = skip_over(s, "PRINT")) != 0) {
-            s = after;
+        } else if (*s == T_PRINT) {
+            s += 1;
 
             // TODO: Parse expression.
             add_call(print_statement);
@@ -207,7 +290,6 @@ static void process_input_buffer() {
 
         // Now we're at the end of our statement.
         if (!error) {
-            s = skip_whitespace(s);
             if (*s == ':') {
                 // Skip colon.
                 s += 1;
@@ -239,7 +321,6 @@ static void process_input_buffer() {
 
 int main(void)
 {
-    volatile unsigned char *loc;
     int i;
 
     home();
@@ -247,6 +328,7 @@ int main(void)
     /*
     // Display the character set.
     for (i = 0; i < 256; i++) {
+        volatile unsigned char *loc;
         // Fails with: unhandled instruction B2
         move_cursor(i % 16, i >> 4);
         // Works.
