@@ -474,17 +474,18 @@ static void process_input_buffer() {
         // Return line to replace or delete, or location to insert new line.
         uint8_t *line = find_line(line_number);
         uint8_t *next_line = get_next_line(line);
+        uint8_t *end_of_program = get_end_of_program(line);
+        int16_t adjustment = 0;
 
         if (next_line == 0 || get_line_number(line) != line_number) {
             // Didn't find line. Insert it here.
-            uint8_t *end_of_program = get_end_of_program(line);
 
             // Next pointer, line number, line, and nul.
-            int buffer_length = strlen(g_input_buffer);
-            int line_length = 4 + buffer_length + 1;
+            uint8_t buffer_length = strlen(g_input_buffer);
+            adjustment = 4 + buffer_length + 1;
 
             // Shift rest of program over.
-            memmove(line + line_length, line, end_of_program - line);
+            memmove(line + adjustment, line, end_of_program - line);
 
             // Next line. Point to yourself initially, we'll adjust below.
             *((uint8_t **) line) = line;
@@ -494,24 +495,36 @@ static void process_input_buffer() {
 
             // Buffer and nul.
             memmove(line + 4, g_input_buffer, buffer_length + 1);
-
-            // Adjust all the next pointers.
-            while ((next_line = get_next_line(line)) != 0) {
-                // Adjust by the amount we inserted.
-                next_line += line_length;
-
-                *((uint8_t **) line) = next_line;
-                line = next_line;
-            }
         } else {
             // Found line.
 
             if (g_input_buffer[0] == '\0') {
                 // Empty line, delete old one.
-                print("Deletion not handled\n");
+
+                // Adjustment is negative.
+                adjustment = line - next_line;
+                memmove(line, next_line, end_of_program - next_line);
             } else {
                 // Replace line.
-                print("Replacement not handled\n");
+
+                // Compute adjustment.
+                uint8_t buffer_length = strlen(g_input_buffer);
+                adjustment = line - next_line + 4 + buffer_length + 1;
+                memmove(next_line + adjustment, next_line, end_of_program - next_line);
+
+                // Buffer and nul.
+                memmove(line + 4, g_input_buffer, buffer_length + 1);
+            }
+        }
+
+        if (adjustment != 0) {
+            // Adjust all the next pointers.
+            while ((next_line = get_next_line(line)) != 0) {
+                // Adjust by the amount we inserted or deleted.
+                next_line += adjustment;
+
+                *((uint8_t **) line) = next_line;
+                line = next_line;
             }
         }
     }
