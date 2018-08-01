@@ -18,7 +18,7 @@ unsigned char input_buffer[40];
 int input_buffer_length = 0;
 
 // Compiled binary.
-char binary[10];
+char binary[128];
 int binary_length = 0;
 void (*binary_function)() = (void (*)()) binary;
 
@@ -110,11 +110,12 @@ static void print(unsigned char *s) {
 }
 
 /**
- * Returns whether the two strings are equal.
+ * If a starts with string b, returns the position in a after b. Else returns null.
  */
-static int strings_equal(unsigned char *a, unsigned char *b) {
-    while (*a != '\0' || *b != '\0') {
+static unsigned char *skip_over(unsigned char *a, unsigned char *b) {
+    while (*a != '\0' && *b != '\0') {
         if (*a != *b) {
+            // Doesn't start with b.
             return 0;
         }
 
@@ -122,14 +123,16 @@ static int strings_equal(unsigned char *a, unsigned char *b) {
         b += 1;
     }
 
-    return 1;
+    // See if we're at the end of b.
+    return *b == '\0' ? a : 0;
 }
 
 /**
  * Display a syntax error message.
  */
 static void syntax_error() {
-    print("\n?SYNTAX ERROR\n");
+    print("\n?SYNTAX ERROR");
+    // No linefeed, assume prompt will do it.
 }
 
 /**
@@ -151,25 +154,76 @@ static void add_return() {
 }
 
 /**
+ * Advance s over whitespace, which is just a space, returning
+ * the new pointer.
+ */
+static unsigned char *skip_whitespace(unsigned char *s) {
+    while (*s == ' ') {
+        s += 1;
+    }
+
+    return s;
+}
+
+/**
  * Process the user's line of input, possibly compiling the code.
  * and executing it.
  */
 static void process_input_buffer() {
+    unsigned char *s; // Where we are in the buffer.
+    unsigned char *after; // After skipping a token.
+    char done;
+
     input_buffer[input_buffer_length] = '\0';
+    s = skip_whitespace(input_buffer);
 
     // Compile the line of BASIC.
     binary_length = 0;
-    if (strings_equal(input_buffer, "HOME")) {
-        add_call(home);
-    } else {
-        add_call(syntax_error);
-    }
+
+    do {
+        char error = 0;
+
+        // Default to being done after one command.
+        done = 1;
+
+        if (*s == '\0') {
+            // Nothing.
+        } else if ((after = skip_over(s, "HOME")) != 0) {
+            add_call(home);
+        } else {
+            error = 1;
+        }
+
+        // Now we're at the end of our instruction.
+        if (!error) {
+            s = skip_whitespace(after);
+            if (*s == ':') {
+                // Skip colon.
+                s += 1;
+
+                // Next instruction.
+                done = 0;
+            } else if (*s != '\0') {
+                // Junk at the end of the instruction.
+                error = 1;
+            }
+        }
+
+        if (error) {
+            add_call(syntax_error);
+        }
+    } while (!done);
 
     // Return from function.
     add_return();
 
-    // Call it.
-    binary_function();
+    if (binary_length > sizeof(binary)) {
+        // TODO: Check while adding bytes, not at the end.
+        print("\n?Binary length exceeded");
+    } else {
+        // Call it.
+        binary_function();
+    }
 }
 
 int main(void)
@@ -207,7 +261,7 @@ int main(void)
     while(1) {
         // Blink cursor.
         i += 1;
-        if (i == 2000) {
+        if (i == 3000) {
             if (showing_cursor) {
                 hide_cursor();
             } else {
@@ -235,7 +289,7 @@ int main(void)
 
                     process_input_buffer();
 
-                    print("]");
+                    print("\n]");
                     input_buffer_length = 0;
                 } else {
                     if (input_buffer_length < sizeof(input_buffer) - 1) {
