@@ -7,6 +7,13 @@ uint8_t title_length = 9;
 #define SCREEN_WIDTH 40
 #define SCREEN_STRIDE (3*SCREEN_WIDTH + 8)
 
+// 6502 instructions.
+#define I_JSR 0x20
+#define I_RTS 0x60
+#define I_LDX 0xA2
+#define I_LDA 0xA9
+
+// Tokens.
 #define T_HOME 0x80
 #define T_PRINT 0x81
 #define T_LIST 0x82
@@ -245,8 +252,11 @@ static uint8_t *get_end_of_program(uint8_t *line) {
     return line + 2;
 }
 
-static void print_statement() {
-    print("Hello world!\n");
+/**
+ * Print a single newline.
+ */
+static void print_newline() {
+    print_char('\n');
 }
 
 /**
@@ -294,10 +304,10 @@ static void syntax_error() {
 /**
  * Add a function call to the compiled buffer.
  */
-static void add_call(void (*function)(void)) {
+static void add_call(void *function) {
     uint16_t addr = (int16_t) function;
 
-    g_compiled[g_compiled_length++] = 0x20;  // JSR
+    g_compiled[g_compiled_length++] = I_JSR;
     g_compiled[g_compiled_length++] = addr & 0xFF;
     g_compiled[g_compiled_length++] = addr >> 8;
 }
@@ -306,19 +316,40 @@ static void add_call(void (*function)(void)) {
  * Add a function return to the compiled buffer.
  */
 static void add_return() {
-    g_compiled[g_compiled_length++] = 0x60;  // RTS
+    g_compiled[g_compiled_length++] = I_RTS;
 }
 
 /**
  * Advance s over whitespace, which is just a space, returning
  * the new pointer.
  */
+/* Unused.
 static uint8_t *skip_whitespace(uint8_t *s) {
     while (*s == ' ') {
         s += 1;
     }
 
     return s;
+}
+*/
+
+/**
+ * Parse an unsigned integer, returning the value and moving the pointer
+ * past the end of the number. The pointer must already be at the beginning
+ * of the number.
+ */
+static uint16_t parse_uint16(uint8_t **s_ptr) {
+    uint16_t value = 0;
+    uint8_t *s = *s_ptr;
+
+    while (*s >= '0' && *s <= '9') {
+        value = value*10 + (*s - '0');
+        s += 1;
+    }
+
+    *s_ptr = s;
+
+    return value;
 }
 
 /**
@@ -331,12 +362,7 @@ static uint16_t tokenize(uint8_t *s) {
 
     // Parse optional line number.
     if (*s >= '0' && *s <= '9') {
-        line_number = 0;
-
-        while (*s >= '0' && *s <= '9') {
-            line_number = line_number*10 + (*s - '0');
-            s += 1;
-        }
+        line_number = parse_uint16(&s);
     } else {
         line_number = 0xFFFF;
     }
@@ -427,8 +453,17 @@ static void process_input_buffer() {
             } else if (*s == T_PRINT) {
                 s += 1;
 
-                // TODO: Parse expression.
-                add_call(print_statement);
+                if (*s >= '0' && *s <= '9') {
+                    // Parse expression.
+                    uint16_t value = parse_uint16(&s);
+                    g_compiled[g_compiled_length++] = I_LDX;
+                    g_compiled[g_compiled_length++] = value >> 8;
+                    g_compiled[g_compiled_length++] = I_LDA;
+                    g_compiled[g_compiled_length++] = value & 0xFF;
+                    add_call(print_int);
+                }
+
+                add_call(print_newline);
             } else if (*s == T_LIST) {
                 s += 1;
                 add_call(list_statement);
@@ -531,6 +566,15 @@ int16_t main(void)
 {
     int16_t blink;
 
+    /*
+    int16_t i, j, k;
+
+    i = 2;
+    j = 3;
+    k = 4;
+    i = i*j;
+    */
+
     // Blank program.
     g_program[0] = '\0';
     g_program[1] = '\0';
@@ -539,7 +583,8 @@ int16_t main(void)
     home();
 
     // Display the character set.
-    if (0) {
+    /*
+    if (1) {
         int16_t i;
         for (i = 0; i < 256; i++) {
             volatile uint8_t *loc;
@@ -552,6 +597,7 @@ int16_t main(void)
         }
         while(1);
     }
+    */
 
     // Print title.
     move_cursor((40 - title_length) / 2, 0);
