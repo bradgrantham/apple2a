@@ -560,14 +560,13 @@ static void process_input_buffer() {
         // Return from function.
         add_return();
 
+        // Dump compiled buffer to the terminal.
         {
             int i;
-            volatile uint8_t *debug_port = (uint8_t *) 0xBFFF;
-            print("Compiled size: ");
-            print_int(g_compiled_length);
-            print_newline();
+            volatile uint8_t *debug_port = (uint8_t *) 0xBFFE;
+            debug_port[0] = g_compiled_length;
             for (i = 0; i < g_compiled_length; i++) {
-                *debug_port = g_compiled[i];
+                debug_port[1] = g_compiled[i];
             }
         }
 

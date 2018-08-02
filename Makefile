@@ -15,7 +15,7 @@ $(ROM): a.out
 	(dd count=5 bs=4096 if=/dev/zero 2> /dev/null; cat a.out) > $(ROM)
 
 run: $(ROM)
-	$(APPLE2E) $(ROM)
+	$(APPLE2E) -map main.map $(ROM)
 
 a.out: main.o interrupt.o vectors.o exporter.o platform.o apple2rom.cfg $(LIB)
 	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o exporter.o platform.o main.o $(LIB)
