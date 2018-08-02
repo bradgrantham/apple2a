@@ -371,18 +371,24 @@ static uint16_t parse_uint16(uint8_t **s_ptr) {
  */
 static uint8_t *compile_expression(uint8_t *s) {
     int plus_count = 0;
+    char have_value_in_ax = 0;
 
     while (1) {
         if (*s >= '0' && *s <= '9') {
             // Parse number.
-            uint16_t value = parse_uint16(&s);
+            uint16_t value;
+
+            if (have_value_in_ax) {
+                // Push on the number stack.
+                add_call(pushax);
+            }
+
+            value = parse_uint16(&s);
             g_compiled[g_compiled_length++] = I_LDX;
             g_compiled[g_compiled_length++] = value >> 8;
             g_compiled[g_compiled_length++] = I_LDA;
             g_compiled[g_compiled_length++] = value & 0xFF;
-
-            // Push on the number stack.
-            add_call(pushax);
+            have_value_in_ax = 1;
         } else if (*s == '+') {
             plus_count += 1;
             s += 1;
@@ -390,9 +396,6 @@ static uint8_t *compile_expression(uint8_t *s) {
             break;
         }
     }
-
-    // Pop the last value from the number stack.
-    add_call(popax);
 
     while (plus_count > 0) {
         add_call(tosaddax);
