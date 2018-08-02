@@ -1,6 +1,7 @@
 tmp.lib
 main.s
 platform.s
+runtime.s
 *.o
 *.dbg
 *.map
