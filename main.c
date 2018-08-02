@@ -323,7 +323,7 @@ static uint8_t *skip_whitespace(uint8_t *s) {
 
 /**
  * Tokenize a string in place. Returns (and removes) any line number, or 0xFFFF
- * if there's none. The new line will be terminated by three nuls.
+ * if there's none.
  */
 static uint16_t tokenize(uint8_t *s) {
     uint8_t *t = s; // Tokenized version.
@@ -367,10 +367,7 @@ static uint16_t tokenize(uint8_t *s) {
         }
     }
 
-    // End with three nuls. The first is the end of line.
-    // The next two is the address of the next line, which is "none".
-    *t++ = '\0';
-    *t++ = '\0';
+    // Terminate string.
     *t++ = '\0';
 
     return line_number;
