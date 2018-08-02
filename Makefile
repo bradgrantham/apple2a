@@ -24,7 +24,7 @@ a.out: main.o interrupt.o vectors.o exporter.o platform.o apple2rom.cfg $(LIB)
 clean:
 	rm -f *.o *.lst a.out platform.s main.s $(LIB) tmp.lib
 
-main.s: main.c
+main.s: main.c exporter.h platform.h
 	$(CC65)/cc65 -t none -O --cpu $(CPU) $<
 
 %.o: %.s

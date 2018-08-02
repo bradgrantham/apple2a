@@ -7,4 +7,7 @@ extern void pushax();
 extern void popax();
 extern void tosaddax();
 
+extern char ptr1;
+#pragma zpsym ("ptr1");
+
 #endif // __EXPORTER_H__

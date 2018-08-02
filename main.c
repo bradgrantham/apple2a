@@ -9,8 +9,14 @@ uint8_t title_length = 9;
 #define SCREEN_STRIDE (3*SCREEN_WIDTH + 8)
 
 // 6502 instructions.
+#define I_CLC 0x18
 #define I_JSR 0x20
+#define I_SEC 0x38
 #define I_RTS 0x60
+#define I_STA_ZPG 0x85
+#define I_STX_ZPG 0x86
+#define I_STA_IND_Y 0x91
+#define I_LDY_IMM 0xA0
 #define I_LDX 0xA2
 #define I_LDA 0xA9
 
@@ -18,12 +24,14 @@ uint8_t title_length = 9;
 #define T_HOME 0x80
 #define T_PRINT 0x81
 #define T_LIST 0x82
+#define T_POKE 0x83
 
 // List of tokens. The token value is the index plus 0x80.
 static uint8_t *TOKEN[] = {
     "HOME",
     "PRINT",
     "LIST",
+    "POKE",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -140,22 +148,26 @@ static void print_int(uint16_t i) {
     // Is this the best way to do this? I've seen it done backwards, where
     // digits are added to a buffer least significant digit first, then reversed,
     // but this seems faster.
+    char printed = 0;
     if (i >= 10000) {
         int16_t r = i / 10000;
         print_char('0' + r);
         i -= r*10000;
+        printed = 1;
     }
-    if (i >= 1000) {
+    if (i >= 1000 || printed) {
         int16_t r = i / 1000;
         print_char('0' + r);
         i -= r*1000;
+        printed = 1;
     }
-    if (i >= 100) {
+    if (i >= 100 || printed) {
         int16_t r = i / 100;
         print_char('0' + r);
         i -= r*100;
+        printed = 1;
     }
-    if (i >= 10) {
+    if (i >= 10 || printed) {
         int16_t r = i / 10;
         print_char('0' + r);
         i -= r*10;
@@ -501,6 +513,24 @@ static void process_input_buffer() {
             } else if (*s == T_LIST) {
                 s += 1;
                 add_call(list_statement);
+            } else if (*s == T_POKE) {
+                s += 1;
+                // Parse address.
+                s = compile_expression(s);
+                // Copy from AX to ptr1.
+                g_compiled[g_compiled_length++] = I_STA_ZPG;
+                g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
+                g_compiled[g_compiled_length++] = I_STX_ZPG;
+                g_compiled[g_compiled_length++] = (uint8_t) &ptr1 + 1;
+                if (*s == ',') {
+                    s++;
+                }
+                // Parse value. LSB is in A.
+                s = compile_expression(s);
+                g_compiled[g_compiled_length++] = I_LDY_IMM;
+                g_compiled[g_compiled_length++] = 0;
+                g_compiled[g_compiled_length++] = I_STA_IND_Y;
+                g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
             } else {
                 error = 1;
             }
@@ -526,6 +556,17 @@ static void process_input_buffer() {
 
         // Return from function.
         add_return();
+
+        {
+            int i;
+            volatile uint8_t *debug_port = (uint8_t *) 0xBFFF;
+            print("Compiled size: ");
+            print_int(g_compiled_length);
+            print_newline();
+            for (i = 0; i < g_compiled_length; i++) {
+                *debug_port = g_compiled[i];
+            }
+        }
 
         if (g_compiled_length > sizeof(g_compiled)) {
             // TODO: Check while adding bytes, not at the end.
