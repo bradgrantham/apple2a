@@ -17,8 +17,8 @@ $(ROM): a.out
 run: $(ROM)
 	$(APPLE2E) $(ROM)
 
-a.out: main.o interrupt.o vectors.o platform.o apple2rom.cfg $(LIB)
-	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o platform.o main.o $(LIB)
+a.out: main.o interrupt.o vectors.o exporter.o platform.o apple2rom.cfg $(LIB)
+	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o exporter.o platform.o main.o $(LIB)
 	awk -f rom_usage.awk < main.map
 
 clean:
@@ -37,6 +37,7 @@ platform.s: platform.c
 platform.o: platform.s
 interrupt.o: interrupt.s
 vectors.o: vectors.s
+exporter.o: exporter.s
 crt0.o: crt0.s
 
 $(LIB): crt0.o supervision.lib

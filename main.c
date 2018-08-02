@@ -1,3 +1,4 @@
+#include "exporter.h"
 #include "platform.h"
 
 uint8_t *title = "Apple IIa";
@@ -353,6 +354,43 @@ static uint16_t parse_uint16(uint8_t **s_ptr) {
 }
 
 /**
+ * Parse an expression, generating code to compute it, leaving the
+ * result in AX.
+ */
+static uint8_t *compile_expression(uint8_t *s) {
+    int plus_count = 0;
+
+    while (1) {
+        if (*s >= '0' && *s <= '9') {
+            // Parse number.
+            uint16_t value = parse_uint16(&s);
+            g_compiled[g_compiled_length++] = I_LDX;
+            g_compiled[g_compiled_length++] = value >> 8;
+            g_compiled[g_compiled_length++] = I_LDA;
+            g_compiled[g_compiled_length++] = value & 0xFF;
+
+            // Push on the number stack.
+            add_call(pushax);
+        } else if (*s == '+') {
+            plus_count += 1;
+            s += 1;
+        } else {
+            break;
+        }
+    }
+
+    // Pop the last value from the number stack.
+    add_call(popax);
+
+    while (plus_count > 0) {
+        add_call(tosaddax);
+        plus_count -= 1;
+    }
+
+    return s;
+}
+
+/**
  * Tokenize a string in place. Returns (and removes) any line number, or 0xFFFF
  * if there's none.
  */
@@ -453,13 +491,9 @@ static void process_input_buffer() {
             } else if (*s == T_PRINT) {
                 s += 1;
 
-                if (*s >= '0' && *s <= '9') {
+                if (*s >= '0' && *s <= '9') { // TODO: Add negative sign and open parenthesis.
                     // Parse expression.
-                    uint16_t value = parse_uint16(&s);
-                    g_compiled[g_compiled_length++] = I_LDX;
-                    g_compiled[g_compiled_length++] = value >> 8;
-                    g_compiled[g_compiled_length++] = I_LDA;
-                    g_compiled[g_compiled_length++] = value & 0xFF;
+                    s = compile_expression(s);
                     add_call(print_int);
                 }
 
