@@ -16,6 +16,18 @@ uint16_t g_showing_cursor = 0;
 // Character at the cursor location.
 uint8_t g_cursor_ch = 0;
 
+// List of variable names, two bytes each, in the same order they are
+// in the zero page (starting at FIRST_VARIABLE). Two nuls means an unused
+// slot. One-letter variable names have a nul for the second character.
+uint8_t g_variable_names[MAX_VARIABLES*2];
+
+/**
+ * Clear out the values of all variables.
+ */
+void clear_variable_values(void) {
+    memset((void *) FIRST_VARIABLE, 0, MAX_VARIABLES*2);
+}
+
 /**
  * Return the memory location of the zero-based (x,y) position on the screen.
  */

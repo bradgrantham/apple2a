@@ -3,10 +3,21 @@
 
 #include "platform.h"
 
+// Maximum number of variables. These fit in the zero page.
+#define MAX_VARIABLES 16
+
+// Location of first variable in zero page. See zeropage.s and zeropage.inc
+// in the compiler tree. They seem to use 26 bytes, so we start after that.
+// Each variable takes two bytes (int16_t).
+#define FIRST_VARIABLE 26
+
 extern uint16_t g_cursor_x;
 extern uint16_t g_cursor_y;
 extern uint16_t g_showing_cursor;
 extern uint8_t g_cursor_ch;
+extern uint8_t g_variable_names[MAX_VARIABLES*2];
+
+void clear_variable_values(void);
 
 uint8_t *cursor_pos(void);
 void show_cursor(void);

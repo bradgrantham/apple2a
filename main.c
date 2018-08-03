@@ -26,9 +26,22 @@ uint8_t title_length = 9;
 #define T_POKE 0x83
 #define T_RUN 0x84
 #define T_NEW 0x85
+#define T_PLUS 0x86
+#define T_MINUS 0x87
+#define T_TIMES 0x88
+#define T_DIVIDE 0x89
+#define T_CARET 0x8A
+#define T_AND 0x8B
+#define T_OR 0x8C
+#define T_GREATER_THAN 0x8D
+#define T_EQUALS 0x8E
+#define T_LESS_THAN 0x8F
 
 // Line number used for "no line number".
 #define INVALID_LINE_NUMBER 0xFFFF
+
+// Variable for "No more space for variables".
+#define OUT_OF_VARIABLE_SPACE 0xFF
 
 // List of tokens. The token value is the index plus 0x80.
 static uint8_t *TOKEN[] = {
@@ -38,6 +51,16 @@ static uint8_t *TOKEN[] = {
     "POKE",
     "RUN",
     "NEW",
+    "+",
+    "-",
+    "*",
+    "/",
+    "^",
+    "AND",
+    "OR",
+    ">",
+    "=",
+    "<",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -225,7 +248,7 @@ static uint8_t *compile_expression(uint8_t *s) {
             value = parse_uint16(&s);
             compile_load_ax(value);
             have_value_in_ax = 1;
-        } else if (*s == '+') {
+        } else if (*s == T_PLUS) {
             plus_count += 1;
             s += 1;
         } else {
@@ -309,6 +332,57 @@ static uint8_t *find_line(uint16_t line_number) {
 }
 
 /**
+ * Find a variable by name. Only the first two letters are considered.
+ * Advances the pointer past the variable name (including letters after
+ * the first two). Returns the memory address of the variable. If we
+ * ran out of space for variables, returns OUT_OF_VARIABLE_SPACE
+ * and does not modify the buffer pointer.
+ */
+static uint8_t find_variable(uint8_t **buffer) {
+    uint8_t *s = *buffer;
+    uint8_t *existing_name = g_variable_names;
+    uint8_t name[2];
+    int16_t var;
+
+    // Pull out the variable name.
+    name[0] = *s++;
+    if (*s != 0 && (*s & 0x80) == 0) {
+        name[1] = *s++;
+    } else {
+        name[1] = 0;
+    }
+    // Skip rest of name.
+    while (*s != 0 && (*s & 0x80) == 0) {
+        s++;
+    }
+
+    for (var = 0; var < MAX_VARIABLES; var++) {
+        if (existing_name[0] == 0 && existing_name[1] == 0) {
+            // First free entry. Allocate it.
+            existing_name[0] = name[0];
+            existing_name[1] = name[1];
+            break;
+        } else if (existing_name[0] == name[0] && existing_name[1] == name[1]) {
+            // Found it.
+            break;
+        }
+        existing_name += 2;
+    }
+
+    if (var == MAX_VARIABLES) {
+        var = OUT_OF_VARIABLE_SPACE;
+    } else {
+        // Convert index to address.
+        var = FIRST_VARIABLE + 2*var;
+
+        // Advance pointer.
+        *buffer = s;
+    }
+
+    return (uint8_t) var;
+}
+
+/**
  * Call to configure the compilation step.
  */
 static void set_up_compile(void) {
@@ -330,6 +404,26 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
 
         if (*s == '\0' || *s == ':') {
             // Empty statement. We skip the colon below.
+        } else if ((*s & 0x80) == 0) {
+            // Not a token. Must be variable assignment.
+            uint8_t var = find_variable(&s);
+            if (var == OUT_OF_VARIABLE_SPACE) {
+                // TODO: Nicer error specifically for out of variable space.
+                error = 1;
+            } else {
+                if (*s != T_EQUALS) {
+                    error = 1;
+                } else {
+                    s += 1;
+                    // Parse address.
+                    s = compile_expression(s);
+                    // Copy to var.
+                    g_compiled[g_compiled_length++] = I_STA_ZPG;
+                    g_compiled[g_compiled_length++] = var;
+                    g_compiled[g_compiled_length++] = I_STX_ZPG;
+                    g_compiled[g_compiled_length++] = var + 1;
+                }
+            }
         } else if (*s == T_HOME) {
             s += 1;
             add_call(home);
@@ -355,15 +449,17 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
             g_compiled[g_compiled_length++] = I_STX_ZPG;
             g_compiled[g_compiled_length++] = (uint8_t) &ptr1 + 1;
-            if (*s == ',') {
+            if (*s != ',') {
+                error = 1;
+            } else {
                 s++;
+                // Parse value. LSB is in A.
+                s = compile_expression(s);
+                g_compiled[g_compiled_length++] = I_LDY_IMM;
+                g_compiled[g_compiled_length++] = 0;
+                g_compiled[g_compiled_length++] = I_STA_IND_Y;
+                g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
             }
-            // Parse value. LSB is in A.
-            s = compile_expression(s);
-            g_compiled[g_compiled_length++] = I_LDY_IMM;
-            g_compiled[g_compiled_length++] = 0;
-            g_compiled[g_compiled_length++] = I_STA_IND_Y;
-            g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
         } else {
             error = 1;
         }
@@ -421,13 +517,29 @@ static void complete_compile_and_execute(void) {
 }
 
 /**
+ * Clear out all variables. This does not clear their value, only our
+ * knowledge of them.
+ */
+void clear_variables(void) {
+    memset(g_variable_names, 0, sizeof(g_variable_names));
+}
+
+/**
  * Compile the stored program and execute it.
  */
 static void compile_stored_program(void) {
     uint8_t *line = g_program;
     uint8_t *next_line;
 
+    // Clear out all variables.
+    clear_variables();
+
     set_up_compile();
+
+    // Generate code to zero out all variable values. Do this in the program
+    // itself because each RUN should clear them out.
+    add_call(clear_variable_values);
+
     while ((next_line = get_next_line(line)) != 0) {
         uint16_t line_number = get_line_number(line);
         compile_buffer(line + 4, line_number);
@@ -532,6 +644,9 @@ int16_t main(void)
     // Clear stored program.
     new_statement();
 
+    // Clear out all variables.
+    clear_variables();
+
     // Initialize UI.
     home();
 
@@ -558,9 +673,6 @@ int16_t main(void)
 
     // Prompt.
     print("\n\n]");
-    // TODO crashes 6502. Delete:
-    // asm("ldy #1");
-    // asm("sta $FFFF,y");
 
     // Keyboard input.
     blink = 0;
