@@ -24,6 +24,10 @@ uint8_t title_length = 9;
 #define T_PRINT 0x81
 #define T_LIST 0x82
 #define T_POKE 0x83
+#define T_RUN 0x84
+
+// Line number used for "no line number".
+#define INVALID_LINE_NUMBER 0xFFFF
 
 // List of tokens. The token value is the index plus 0x80.
 static uint8_t *TOKEN[] = {
@@ -31,6 +35,7 @@ static uint8_t *TOKEN[] = {
     "PRINT",
     "LIST",
     "POKE",
+    "RUN",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -38,7 +43,7 @@ uint8_t g_input_buffer[40];
 int16_t g_input_buffer_length = 0;
 
 // Compiled binary.
-uint8_t g_compiled[128];
+uint8_t g_compiled[1024];
 int16_t g_compiled_length = 0;
 void (*g_compiled_function)() = (void (*)()) g_compiled;
 
@@ -220,8 +225,8 @@ static uint8_t *compile_expression(uint8_t *s) {
 }
 
 /**
- * Tokenize a string in place. Returns (and removes) any line number, or 0xFFFF
- * if there's none.
+ * Tokenize a string in place. Returns (and removes) any line number, or
+ * INVALID_LINE_NUMBER if there's none.
  */
 static uint16_t tokenize(uint8_t *s) {
     uint8_t *t = s; // Tokenized version.
@@ -231,7 +236,7 @@ static uint16_t tokenize(uint8_t *s) {
     if (*s >= '0' && *s <= '9') {
         line_number = parse_uint16(&s);
     } else {
-        line_number = 0xFFFF;
+        line_number = INVALID_LINE_NUMBER;
     }
 
     // Convert tokens.
@@ -287,110 +292,150 @@ static uint8_t *find_line(uint16_t line_number) {
 }
 
 /**
+ * Call to configure the compilation step.
+ */
+static void set_up_compile(void) {
+    g_compiled_length = 0;
+}
+
+/**
+ * Compile the tokenized line of BASIC, adding it to the g_compiled binary.
+ */
+static void compile_buffer(uint8_t *buffer) {
+    uint8_t *s = buffer;
+    uint8_t done;
+
+    do {
+        int8_t error = 0;
+
+        // Default to being done after one statement.
+        done = 1;
+
+        if (*s == '\0' || *s == ':') {
+            // Empty statement. We skip the colon below.
+        } else if (*s == T_HOME) {
+            s += 1;
+            add_call(home);
+        } else if (*s == T_PRINT) {
+            s += 1;
+
+            if (*s >= '0' && *s <= '9') { // TODO: Add negative sign and open parenthesis.
+                // Parse expression.
+                s = compile_expression(s);
+                add_call(print_int);
+            }
+
+            add_call(print_newline);
+        } else if (*s == T_LIST) {
+            s += 1;
+            add_call(list_statement);
+        } else if (*s == T_POKE) {
+            s += 1;
+            // Parse address.
+            s = compile_expression(s);
+            // Copy from AX to ptr1.
+            g_compiled[g_compiled_length++] = I_STA_ZPG;
+            g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
+            g_compiled[g_compiled_length++] = I_STX_ZPG;
+            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 + 1;
+            if (*s == ',') {
+                s++;
+            }
+            // Parse value. LSB is in A.
+            s = compile_expression(s);
+            g_compiled[g_compiled_length++] = I_LDY_IMM;
+            g_compiled[g_compiled_length++] = 0;
+            g_compiled[g_compiled_length++] = I_STA_IND_Y;
+            g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
+        } else {
+            error = 1;
+        }
+
+        // Now we're at the end of our statement.
+        if (!error) {
+            if (*s == ':') {
+                // Skip colon.
+                s += 1;
+
+                // Next statement.
+                done = 0;
+            } else if (*s != '\0') {
+                // Junk at the end of the statement.
+                error = 1;
+            }
+        }
+
+        if (error) {
+            add_call(syntax_error);
+        }
+    } while (!done);
+}
+
+/**
+ * Complete the compilation buffer and run it.
+ */
+static void complete_compile_and_execute(void) {
+    // Return from function.
+    add_return();
+
+    // Dump compiled buffer to the terminal.
+    {
+        int i;
+        uint8_t *debug_port = (uint8_t *) 0xBFFE;
+
+        debug_port[0] = g_compiled_length;
+        for (i = 0; i < g_compiled_length; i++) {
+            debug_port[1] = g_compiled[i];
+        }
+    }
+
+    if (g_compiled_length > sizeof(g_compiled)) {
+        // TODO: Check while adding bytes, not at the end.
+        print("\n?Binary length exceeded");
+    } else {
+        // Call it.
+        g_compiled_function();
+    }
+}
+
+/**
+ * Compile the stored program and execute it.
+ */
+static void compile_stored_program(void) {
+    uint8_t *line = g_program;
+    uint8_t *next_line;
+
+    while ((next_line = get_next_line(line)) != 0) {
+        uint16_t line_number = get_line_number(line);
+        compile_buffer(line + 4);
+
+        line = next_line;
+    }
+}
+
+/**
  * Process the user's line of input, possibly compiling the code.
  * and executing it.
  */
 static void process_input_buffer() {
-    uint8_t *s; // Where we are in the buffer.
-    int8_t done;
     uint16_t line_number;
 
     g_input_buffer[g_input_buffer_length] = '\0';
 
     // Tokenize in-place.
     line_number = tokenize(g_input_buffer);
-    if (line_number == 0xFFFF) {
+    if (line_number == INVALID_LINE_NUMBER) {
         // Immediate mode.
-        s = g_input_buffer;
 
-        // Compile the line of BASIC.
-        g_compiled_length = 0;
-
-        do {
-            int8_t error = 0;
-
-            // Default to being done after one statement.
-            done = 1;
-
-            if (*s == '\0' || *s == ':') {
-                // Empty statement.
-            } else if (*s == T_HOME) {
-                s += 1;
-                add_call(home);
-            } else if (*s == T_PRINT) {
-                s += 1;
-
-                if (*s >= '0' && *s <= '9') { // TODO: Add negative sign and open parenthesis.
-                    // Parse expression.
-                    s = compile_expression(s);
-                    add_call(print_int);
-                }
-
-                add_call(print_newline);
-            } else if (*s == T_LIST) {
-                s += 1;
-                add_call(list_statement);
-            } else if (*s == T_POKE) {
-                s += 1;
-                // Parse address.
-                s = compile_expression(s);
-                // Copy from AX to ptr1.
-                g_compiled[g_compiled_length++] = I_STA_ZPG;
-                g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
-                g_compiled[g_compiled_length++] = I_STX_ZPG;
-                g_compiled[g_compiled_length++] = (uint8_t) &ptr1 + 1;
-                if (*s == ',') {
-                    s++;
-                }
-                // Parse value. LSB is in A.
-                s = compile_expression(s);
-                g_compiled[g_compiled_length++] = I_LDY_IMM;
-                g_compiled[g_compiled_length++] = 0;
-                g_compiled[g_compiled_length++] = I_STA_IND_Y;
-                g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
-            } else {
-                error = 1;
-            }
-
-            // Now we're at the end of our statement.
-            if (!error) {
-                if (*s == ':') {
-                    // Skip colon.
-                    s += 1;
-
-                    // Next statement.
-                    done = 0;
-                } else if (*s != '\0') {
-                    // Junk at the end of the statement.
-                    error = 1;
-                }
-            }
-
-            if (error) {
-                add_call(syntax_error);
-            }
-        } while (!done);
-
-        // Return from function.
-        add_return();
-
-        // Dump compiled buffer to the terminal.
-        {
-            int i;
-            uint8_t *debug_port = (uint8_t *) 0xBFFE;
-            debug_port[0] = g_compiled_length;
-            for (i = 0; i < g_compiled_length; i++) {
-                debug_port[1] = g_compiled[i];
-            }
-        }
-
-        if (g_compiled_length > sizeof(g_compiled)) {
-            // TODO: Check while adding bytes, not at the end.
-            print("\n?Binary length exceeded");
+        set_up_compile();
+        // See if it's the "RUN" command, which we don't compile.
+        if (g_input_buffer[0] == T_RUN) {
+            compile_stored_program();
         } else {
-            // Call it.
-            g_compiled_function();
+            // Compile the immediate mode line.
+            compile_buffer(g_input_buffer);
         }
+        complete_compile_and_execute();
     } else {
         // Stored mode. Add line to program.
 
