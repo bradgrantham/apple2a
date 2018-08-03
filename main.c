@@ -16,8 +16,10 @@ uint8_t title_length = 9;
 #define I_STX_ZPG 0x86
 #define I_STA_IND_Y 0x91
 #define I_LDY_IMM 0xA0
-#define I_LDX 0xA2
-#define I_LDA 0xA9
+#define I_LDX_IMM 0xA2
+#define I_LDA_ZPG 0xA5
+#define I_LDX_ZPG 0xA6
+#define I_LDA_IMM 0xA9
 
 // Tokens.
 #define T_HOME 0x80
@@ -221,10 +223,61 @@ static uint16_t parse_uint16(uint8_t **s_ptr) {
  * Generate code to put the value into AX.
  */
 static void compile_load_ax(uint16_t value) {
-    g_compiled[g_compiled_length++] = I_LDX;
+    g_compiled[g_compiled_length++] = I_LDX_IMM;
     g_compiled[g_compiled_length++] = value >> 8;
-    g_compiled[g_compiled_length++] = I_LDA;
+    g_compiled[g_compiled_length++] = I_LDA_IMM;
     g_compiled[g_compiled_length++] = value & 0xFF;
+}
+
+/**
+ * Find a variable by name. Only the first two letters are considered.
+ * Advances the pointer past the variable name (including letters after
+ * the first two). Returns the memory address of the variable. If we
+ * ran out of space for variables, returns OUT_OF_VARIABLE_SPACE
+ * and does not modify the buffer pointer.
+ */
+static uint8_t find_variable(uint8_t **buffer) {
+    uint8_t *s = *buffer;
+    uint8_t *existing_name = g_variable_names;
+    uint8_t name[2];
+    int16_t var;
+
+    // Pull out the variable name.
+    name[0] = *s++;
+    if (*s != 0 && (*s & 0x80) == 0) {
+        name[1] = *s++;
+    } else {
+        name[1] = 0;
+    }
+    // Skip rest of name.
+    while (*s != 0 && (*s & 0x80) == 0) {
+        s++;
+    }
+
+    for (var = 0; var < MAX_VARIABLES; var++) {
+        if (existing_name[0] == 0 && existing_name[1] == 0) {
+            // First free entry. Allocate it.
+            existing_name[0] = name[0];
+            existing_name[1] = name[1];
+            break;
+        } else if (existing_name[0] == name[0] && existing_name[1] == name[1]) {
+            // Found it.
+            break;
+        }
+        existing_name += 2;
+    }
+
+    if (var == MAX_VARIABLES) {
+        var = OUT_OF_VARIABLE_SPACE;
+    } else {
+        // Convert index to address.
+        var = FIRST_VARIABLE + 2*var;
+
+        // Advance pointer.
+        *buffer = s;
+    }
+
+    return (uint8_t) var;
 }
 
 /**
@@ -247,6 +300,28 @@ static uint8_t *compile_expression(uint8_t *s) {
 
             value = parse_uint16(&s);
             compile_load_ax(value);
+            have_value_in_ax = 1;
+        } else if (*s >= 'A' && *s <= 'Z') {
+            // Variable reference.
+            uint8_t var = find_variable(&s);
+
+            if (have_value_in_ax) {
+                // Push on the number stack.
+                add_call(pushax);
+            }
+
+            if (var == OUT_OF_VARIABLE_SPACE) {
+                // TODO: Not sure how to deal with this. For now just
+                // fill in with zero, since assigning to this elsewhere
+                // will cause an error.
+                compile_load_ax(0);
+            } else {
+                // Load from var.
+                g_compiled[g_compiled_length++] = I_LDA_ZPG;
+                g_compiled[g_compiled_length++] = var;
+                g_compiled[g_compiled_length++] = I_LDX_ZPG;
+                g_compiled[g_compiled_length++] = var + 1;
+            }
             have_value_in_ax = 1;
         } else if (*s == T_PLUS) {
             plus_count += 1;
@@ -332,57 +407,6 @@ static uint8_t *find_line(uint16_t line_number) {
 }
 
 /**
- * Find a variable by name. Only the first two letters are considered.
- * Advances the pointer past the variable name (including letters after
- * the first two). Returns the memory address of the variable. If we
- * ran out of space for variables, returns OUT_OF_VARIABLE_SPACE
- * and does not modify the buffer pointer.
- */
-static uint8_t find_variable(uint8_t **buffer) {
-    uint8_t *s = *buffer;
-    uint8_t *existing_name = g_variable_names;
-    uint8_t name[2];
-    int16_t var;
-
-    // Pull out the variable name.
-    name[0] = *s++;
-    if (*s != 0 && (*s & 0x80) == 0) {
-        name[1] = *s++;
-    } else {
-        name[1] = 0;
-    }
-    // Skip rest of name.
-    while (*s != 0 && (*s & 0x80) == 0) {
-        s++;
-    }
-
-    for (var = 0; var < MAX_VARIABLES; var++) {
-        if (existing_name[0] == 0 && existing_name[1] == 0) {
-            // First free entry. Allocate it.
-            existing_name[0] = name[0];
-            existing_name[1] = name[1];
-            break;
-        } else if (existing_name[0] == name[0] && existing_name[1] == name[1]) {
-            // Found it.
-            break;
-        }
-        existing_name += 2;
-    }
-
-    if (var == MAX_VARIABLES) {
-        var = OUT_OF_VARIABLE_SPACE;
-    } else {
-        // Convert index to address.
-        var = FIRST_VARIABLE + 2*var;
-
-        // Advance pointer.
-        *buffer = s;
-    }
-
-    return (uint8_t) var;
-}
-
-/**
  * Call to configure the compilation step.
  */
 static void set_up_compile(void) {
@@ -404,8 +428,8 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
 
         if (*s == '\0' || *s == ':') {
             // Empty statement. We skip the colon below.
-        } else if ((*s & 0x80) == 0) {
-            // Not a token. Must be variable assignment.
+        } else if (*s >= 'A' && *s <= 'Z') {
+            // Must be variable assignment.
             uint8_t var = find_variable(&s);
             if (var == OUT_OF_VARIABLE_SPACE) {
                 // TODO: Nicer error specifically for out of variable space.
@@ -430,7 +454,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
         } else if (*s == T_PRINT) {
             s += 1;
 
-            if (*s >= '0' && *s <= '9') { // TODO: Add negative sign and open parenthesis.
+            if (*s != '\0' && *s != ':') {
                 // Parse expression.
                 s = compile_expression(s);
                 add_call(print_int);
