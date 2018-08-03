@@ -6,6 +6,9 @@
 extern void pushax();
 extern void popax();
 extern void tosaddax();
+extern void tossubax();
+extern void tosmulax();
+extern void tosdivax();
 
 // Two bytes each.
 extern unsigned int ptr1;

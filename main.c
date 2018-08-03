@@ -34,8 +34,8 @@ uint8_t title_length = 9;
 #define T_NEW 0x85
 #define T_PLUS 0x86
 #define T_MINUS 0x87
-#define T_TIMES 0x88
-#define T_DIVIDE 0x89
+#define T_ASTERISK 0x88
+#define T_SLASH 0x89
 #define T_CARET 0x8A
 #define T_AND 0x8B
 #define T_OR 0x8C
@@ -46,6 +46,30 @@ uint8_t title_length = 9;
 #define T_IF 0x91
 #define T_THEN 0x92
 
+// Operators. These encode both the operator (high nybble) and the precedence
+// (low nybble). Lower precedence has a lower low nybble value. For example,
+// OP_ADD (0x99) and OP_SUB (0xA9) have the same precedence (9). By convention
+// the precedence is the value of the lowest-valued operator in its class
+// (OP_ADD = 0x99), but only the relative values of precedence matter. All
+// of these are left-associative, as in AppleSoft BASIC. (Even though
+// exponentiation really should be right-associative.)
+#define OP_PRECEDENCE(op) ((op) & 0x0F)
+#define OP_OR 0x00
+#define OP_AND 0x11
+#define OP_NOT 0x22
+#define OP_LTE 0x33
+#define OP_GTE 0x43
+#define OP_EQ 0x55
+#define OP_NEQ 0x65
+#define OP_LT 0x75
+#define OP_GT 0x85
+#define OP_ADD 0x99
+#define OP_SUB 0xA9
+#define OP_MULT 0xBB
+#define OP_DIV 0xCB
+#define OP_NEG 0xDD
+#define OP_EXP 0xEE
+
 // Line number used for "no line number".
 #define INVALID_LINE_NUMBER 0xFFFF
 
@@ -54,6 +78,9 @@ uint8_t title_length = 9;
 
 // Maximum number of lines in stored program.
 #define MAX_LINES 128
+
+// Maximum number of operators in the operator stack.
+#define MAX_OP_STACK 16
 
 // Test for whether a character is a digit.
 #define IS_DIGIT(ch) ((ch) >= '0' && (ch) <= '9')
@@ -106,6 +133,11 @@ uint8_t g_program[1024];
 // one for the address in memory of the compiled code.
 uint16_t g_line_address[MAX_LINES*2];
 uint16_t g_line_address_count;
+
+// Operator stack, of the expression-evaluation routines. These are from the
+// OP_ constants.
+uint8_t g_op_stack[MAX_OP_STACK];
+uint8_t g_op_stack_size = 0;
 
 /**
  * Print the tokenized string, with tokens displayed as their full text.
@@ -322,25 +354,66 @@ static uint16_t find_line_address(uint16_t line_number) {
 }
 
 /**
+ * Pop an operator off the operator stack and compile it.
+ */
+static void pop_operator_stack() {
+    uint8_t op = g_op_stack[--g_op_stack_size];
+
+    switch (op) {
+        case OP_ADD:
+            add_call(tosaddax);
+            break;
+
+        case OP_SUB:
+            add_call(tossubax);
+            break;
+
+        case OP_MULT:
+            add_call(tosmulax);
+            break;
+
+        case OP_DIV:
+            add_call(tosdivax);
+            break;
+    }
+}
+
+/**
+ * Push an operator onto the operator stack. Follow the Shunting-yard
+ * algorithm so that higher-precedence operators are performed
+ * first.
+ *
+ * https://en.wikipedia.org/wiki/Shunting-yard_algorithm
+ */
+static void push_operator_stack(uint8_t op) {
+    // All our operators are left-associative, so no special check for the case
+    // of equal precedence.
+    while (g_op_stack_size > 0 &&
+            OP_PRECEDENCE(g_op_stack[g_op_stack_size - 1]) >= OP_PRECEDENCE(op)) {
+
+        pop_operator_stack();
+    }
+
+    // TODO Check for g_op_stack overflow.
+    g_op_stack[g_op_stack_size++] = op;
+}
+
+/**
  * Parse an expression, generating code to compute it, leaving the
  * result in AX.
  */
 static uint8_t *compile_expression(uint8_t *s) {
-    int plus_count = 0;
     char have_value_in_ax = 0;
 
     while (1) {
         if (IS_DIGIT(*s)) {
             // Parse number.
-            uint16_t value;
-
             if (have_value_in_ax) {
                 // Push on the number stack.
                 add_call(pushax);
             }
 
-            value = parse_uint16(&s);
-            compile_load_ax(value);
+            compile_load_ax(parse_uint16(&s));
             have_value_in_ax = 1;
         } else if (IS_FIRST_VARIABLE_LETTER(*s)) {
             // Variable reference.
@@ -365,16 +438,26 @@ static uint8_t *compile_expression(uint8_t *s) {
             }
             have_value_in_ax = 1;
         } else if (*s == T_PLUS) {
-            plus_count += 1;
             s += 1;
+            push_operator_stack(OP_ADD);
+        } else if (*s == T_MINUS) {
+            s += 1;
+            // TODO check for unary.
+            push_operator_stack(OP_SUB);
+        } else if (*s == T_ASTERISK) {
+            s += 1;
+            push_operator_stack(OP_MULT);
+        } else if (*s == T_SLASH) {
+            s += 1;
+            push_operator_stack(OP_DIV);
         } else {
             break;
         }
     }
 
-    while (plus_count > 0) {
-        add_call(tosaddax);
-        plus_count -= 1;
+    // Empty the operator stack.
+    while (g_op_stack_size > 0) {
+        pop_operator_stack();
     }
 
     return s;
@@ -788,6 +871,14 @@ static void process_input_buffer() {
 int16_t main(void)
 {
     int16_t blink;
+
+       // For testing generated code. TODO remove
+    {
+        int16_t a, b, c;
+        b = 5;
+        c = 6;
+        a = b-c;
+    }
 
     // Clear stored program.
     new_statement();
