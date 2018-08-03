@@ -8,6 +8,7 @@ uint8_t *title = "Apple IIa";
 uint8_t title_length = 9;
 
 // 6502 instructions.
+#define I_ORA_ZPG 0x05
 #define I_CLC 0x18
 #define I_JSR 0x20
 #define I_SEC 0x38
@@ -21,6 +22,8 @@ uint8_t title_length = 9;
 #define I_LDA_ZPG 0xA5
 #define I_LDX_ZPG 0xA6
 #define I_LDA_IMM 0xA9
+#define I_BNE_REL 0xD0
+#define I_BEQ_REL 0xF0
 
 // Tokens.
 #define T_HOME 0x80
@@ -40,6 +43,8 @@ uint8_t title_length = 9;
 #define T_EQUALS 0x8E
 #define T_LESS_THAN 0x8F
 #define T_GOTO 0x90
+#define T_IF 0x91
+#define T_THEN 0x92
 
 // Line number used for "no line number".
 #define INVALID_LINE_NUMBER 0xFFFF
@@ -76,6 +81,8 @@ static uint8_t *TOKEN[] = {
     "=",
     "<",
     "GOTO",
+    "IF",
+    "THEN",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -454,9 +461,13 @@ static void set_up_compile(void) {
 static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
     uint8_t *s = buffer;
     uint8_t done;
+    // Keep track of addresses that point to the end of the line.
+    uint8_t **end_of_line_address[4];
+    uint8_t end_of_line_count = 0;
 
     do {
         int8_t error = 0;
+        int8_t continue_statement = 0;
 
         // Default to being done after one statement.
         done = 1;
@@ -538,13 +549,47 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                     g_compiled[g_compiled_length++] = addr >> 8;
                 }
             }
+        } else if (*s == T_IF) {
+            uint16_t saved_compiled_length = g_compiled_length;
+            s += 1;
+            // Parse conditional expression.
+            s = compile_expression(s);
+            // Check if AX is zero. Or the two bytes together, through the zero page.
+            g_compiled[g_compiled_length++] = I_STX_ZPG;
+            g_compiled[g_compiled_length++] = (uint8_t) &tmp1;
+            g_compiled[g_compiled_length++] = I_ORA_ZPG;
+            g_compiled[g_compiled_length++] = (uint8_t) &tmp1;
+            // If so, skip to end of this line.
+            g_compiled[g_compiled_length++] = I_BNE_REL;
+            g_compiled[g_compiled_length++] = 3; // Skip over absolute jump.
+            g_compiled[g_compiled_length++] = I_JMP_ABS;
+            // TODO Check for overflow of end_of_line_address:
+            end_of_line_address[end_of_line_count++] = (uint8_t **) &g_compiled[g_compiled_length];
+            g_compiled[g_compiled_length++] = 0; // Address of next line.
+            g_compiled[g_compiled_length++] = 0; // Address of next line.
+
+            if (*s == T_THEN) {
+                // Skip THEN and continue
+                s += 1;
+                continue_statement = 1;
+            } else if (*s == T_GOTO) {
+                // Just continue, we'll pick it up after the loop.
+                continue_statement = 1;
+            } else {
+                // Must be THEN or GOTO. Erase what we've done.
+                g_compiled_length = saved_compiled_length;
+                error = 1;
+            }
         } else {
             error = 1;
         }
 
         // Now we're at the end of our statement.
         if (!error) {
-            if (*s == ':') {
+            if (continue_statement) {
+                // No problem, just continue from here.
+                done = 0;
+            } else if (*s == ':') {
                 // Skip colon.
                 s += 1;
 
@@ -557,14 +602,23 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
         }
 
         if (error) {
+            end_of_line_count = 0;
             if (line_number != INVALID_LINE_NUMBER) {
                 compile_load_ax(line_number);
                 add_call(syntax_error_in_line);
             } else {
                 add_call(syntax_error);
             }
+            // TODO This won't work after a GOSUB. Maybe we should have our
+            // own stack for that.
+            add_return();
         }
     } while (!done);
+
+    // Fill in the places where we needed the address of the end of the line.
+    while (end_of_line_count > 0) {
+        *end_of_line_address[--end_of_line_count] = &g_compiled[g_compiled_length];
+    }
 }
 
 /**

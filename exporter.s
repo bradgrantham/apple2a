@@ -9,8 +9,10 @@
 .import     popax
 .import     tosaddax
 .importzp   ptr1
+.importzp   tmp1
 .export     _pushax := pushax
 .export     _popax := popax
 .export     _tosaddax := tosaddax
 .exportzp   _ptr1 = ptr1
+.exportzp   _tmp1 = tmp1
 
