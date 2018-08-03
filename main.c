@@ -25,6 +25,7 @@ uint8_t title_length = 9;
 #define T_LIST 0x82
 #define T_POKE 0x83
 #define T_RUN 0x84
+#define T_NEW 0x85
 
 // Line number used for "no line number".
 #define INVALID_LINE_NUMBER 0xFFFF
@@ -36,6 +37,7 @@ static uint8_t *TOKEN[] = {
     "LIST",
     "POKE",
     "RUN",
+    "NEW",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -112,6 +114,14 @@ static uint8_t *get_end_of_program(uint8_t *line) {
 }
 
 /**
+ * Clear the stored program.
+ */
+static void new_statement() {
+    g_program[0] = '\0';
+    g_program[1] = '\0';
+}
+
+/**
  * List the stored program.
  */
 static void list_statement() {
@@ -185,6 +195,16 @@ static uint16_t parse_uint16(uint8_t **s_ptr) {
 }
 
 /**
+ * Generate code to put the value into AX.
+ */
+static void compile_load_ax(uint16_t value) {
+    g_compiled[g_compiled_length++] = I_LDX;
+    g_compiled[g_compiled_length++] = value >> 8;
+    g_compiled[g_compiled_length++] = I_LDA;
+    g_compiled[g_compiled_length++] = value & 0xFF;
+}
+
+/**
  * Parse an expression, generating code to compute it, leaving the
  * result in AX.
  */
@@ -203,10 +223,7 @@ static uint8_t *compile_expression(uint8_t *s) {
             }
 
             value = parse_uint16(&s);
-            g_compiled[g_compiled_length++] = I_LDX;
-            g_compiled[g_compiled_length++] = value >> 8;
-            g_compiled[g_compiled_length++] = I_LDA;
-            g_compiled[g_compiled_length++] = value & 0xFF;
+            compile_load_ax(value);
             have_value_in_ax = 1;
         } else if (*s == '+') {
             plus_count += 1;
@@ -301,7 +318,7 @@ static void set_up_compile(void) {
 /**
  * Compile the tokenized line of BASIC, adding it to the g_compiled binary.
  */
-static void compile_buffer(uint8_t *buffer) {
+static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
     uint8_t *s = buffer;
     uint8_t done;
 
@@ -366,7 +383,12 @@ static void compile_buffer(uint8_t *buffer) {
         }
 
         if (error) {
-            add_call(syntax_error);
+            if (line_number != INVALID_LINE_NUMBER) {
+                compile_load_ax(line_number);
+                add_call(syntax_error_in_line);
+            } else {
+                add_call(syntax_error);
+            }
         }
     } while (!done);
 }
@@ -405,12 +427,14 @@ static void compile_stored_program(void) {
     uint8_t *line = g_program;
     uint8_t *next_line;
 
+    set_up_compile();
     while ((next_line = get_next_line(line)) != 0) {
         uint16_t line_number = get_line_number(line);
-        compile_buffer(line + 4);
+        compile_buffer(line + 4, line_number);
 
         line = next_line;
     }
+    complete_compile_and_execute();
 }
 
 /**
@@ -427,15 +451,18 @@ static void process_input_buffer() {
     if (line_number == INVALID_LINE_NUMBER) {
         // Immediate mode.
 
-        set_up_compile();
-        // See if it's the "RUN" command, which we don't compile.
         if (g_input_buffer[0] == T_RUN) {
+            // We don't compile "RUN".
             compile_stored_program();
+        } else if (g_input_buffer[0] == T_NEW) {
+            // We don't compile "NEW".
+            new_statement();
         } else {
             // Compile the immediate mode line.
-            compile_buffer(g_input_buffer);
+            set_up_compile();
+            compile_buffer(g_input_buffer, INVALID_LINE_NUMBER);
+            complete_compile_and_execute();
         }
-        complete_compile_and_execute();
     } else {
         // Stored mode. Add line to program.
 
@@ -502,18 +529,8 @@ int16_t main(void)
 {
     int16_t blink;
 
-    /*
-    int16_t i, j, k;
-
-    i = 2;
-    j = 3;
-    k = 4;
-    i = i*j;
-    */
-
-    // Blank program.
-    g_program[0] = '\0';
-    g_program[1] = '\0';
+    // Clear stored program.
+    new_statement();
 
     // Initialize UI.
     home();

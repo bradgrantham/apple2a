@@ -184,3 +184,13 @@ void syntax_error(void) {
     print("\n?SYNTAX ERROR");
     // No linefeed, assume prompt will do it.
 }
+
+/**
+ * Display a syntax error message for stored program.
+ */
+void syntax_error_in_line(uint16_t line_number) {
+    print("\n?SYNTAX ERROR IN ");
+    print_int(line_number);
+
+    // No linefeed, assume prompt will do it.
+}

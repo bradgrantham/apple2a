@@ -23,5 +23,6 @@ void print_int(uint16_t i);
 void print_newline(void);
 
 void syntax_error(void);
+void syntax_error_in_line(uint16_t line_number);
 
 #endif // __RUNTIME_H__
