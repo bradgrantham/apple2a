@@ -40,7 +40,7 @@ uint8_t title_length = 9;
 #define T_AND 0x8B
 #define T_OR 0x8C
 #define T_GREATER_THAN 0x8D
-#define T_EQUALS 0x8E
+#define T_EQUAL 0x8E
 #define T_LESS_THAN 0x8F
 #define T_GOTO 0x90
 #define T_IF 0x91
@@ -69,6 +69,7 @@ uint8_t title_length = 9;
 #define OP_DIV 0xCB
 #define OP_NEG 0xDD
 #define OP_EXP 0xEE
+#define OP_INVALID 0xFF
 
 // Line number used for "no line number".
 #define INVALID_LINE_NUMBER 0xFFFF
@@ -375,6 +376,30 @@ static void pop_operator_stack() {
         case OP_DIV:
             add_call(tosdivax);
             break;
+
+        case OP_EQ:
+            add_call(toseqax);
+            break;
+
+        case OP_NEQ:
+            add_call(tosneax);
+            break;
+
+        case OP_LT:
+            add_call(tosltax);
+            break;
+
+        case OP_GT:
+            add_call(tosgtax);
+            break;
+
+        case OP_LTE:
+            add_call(tosleax);
+            break;
+
+        case OP_GTE:
+            add_call(tosgeax);
+            break;
     }
 }
 
@@ -437,21 +462,57 @@ static uint8_t *compile_expression(uint8_t *s) {
                 g_compiled[g_compiled_length++] = var + 1;
             }
             have_value_in_ax = 1;
-        } else if (*s == T_PLUS) {
-            s += 1;
-            push_operator_stack(OP_ADD);
-        } else if (*s == T_MINUS) {
-            s += 1;
-            // TODO check for unary.
-            push_operator_stack(OP_SUB);
-        } else if (*s == T_ASTERISK) {
-            s += 1;
-            push_operator_stack(OP_MULT);
-        } else if (*s == T_SLASH) {
-            s += 1;
-            push_operator_stack(OP_DIV);
         } else {
-            break;
+            // Check if it's an operator.
+            uint8_t op = OP_INVALID;
+
+            if (*s == T_PLUS) {
+                op = OP_ADD;
+            } else if (*s == T_MINUS) {
+                // TODO check for unary.
+                op = OP_SUB;
+            } else if (*s == T_ASTERISK) {
+                op = OP_MULT;
+            } else if (*s == T_SLASH) {
+                op = OP_DIV;
+            } else if (*s == T_EQUAL) {
+                if (s[1] == T_LESS_THAN) {
+                    s += 1;
+                    op = OP_LTE;
+                } else if (s[1] == T_GREATER_THAN) {
+                    s += 1;
+                    op = OP_GTE;
+                } else {
+                    op = OP_EQ;
+                }
+            } else if (*s == T_LESS_THAN) {
+                if (s[1] == T_EQUAL) {
+                    s += 1;
+                    op = OP_LTE;
+                } else if (s[1] == T_GREATER_THAN) {
+                    s += 1;
+                    op = OP_NEQ;
+                } else {
+                    op = OP_LT;
+                }
+            } else if (*s == T_GREATER_THAN) {
+                if (s[1] == T_EQUAL) {
+                    s += 1;
+                    op = OP_GTE;
+                } else if (s[1] == T_LESS_THAN) {
+                    s += 1;
+                    op = OP_NEQ;
+                } else {
+                    op = OP_GT;
+                }
+            }
+
+            if (op != OP_INVALID) {
+                s += 1;
+                push_operator_stack(op);
+            } else {
+                break;
+            }
         }
     }
 
@@ -564,7 +625,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                 // TODO: Nicer error specifically for out of variable space.
                 error = 1;
             } else {
-                if (*s != T_EQUALS) {
+                if (*s != T_EQUAL) {
                     error = 1;
                 } else {
                     s += 1;
@@ -877,7 +938,7 @@ int16_t main(void)
         int16_t a, b, c;
         b = 5;
         c = 6;
-        a = b-c;
+        a = b == c;
     }
 
     // Clear stored program.

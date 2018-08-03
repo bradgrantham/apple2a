@@ -9,6 +9,12 @@ extern void tosaddax();
 extern void tossubax();
 extern void tosmulax();
 extern void tosdivax();
+extern void toseqax();
+extern void tosneax();
+extern void tosltax();
+extern void tosgtax();
+extern void tosleax();
+extern void tosgeax();
 
 // Two bytes each.
 extern unsigned int ptr1;

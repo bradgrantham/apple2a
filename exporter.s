@@ -17,6 +17,18 @@
 .export     _tosmulax := tosmulax
 .import     tosdivax
 .export     _tosdivax := tosdivax
+.import     toseqax
+.export     _toseqax := toseqax
+.import     tosneax
+.export     _tosneax := tosneax
+.import     tosltax
+.export     _tosltax := tosltax
+.import     tosgtax
+.export     _tosgtax := tosgtax
+.import     tosleax
+.export     _tosleax := tosleax
+.import     tosgeax
+.export     _tosgeax := tosgeax
 
 .importzp   ptr1
 .exportzp   _ptr1 = ptr1
