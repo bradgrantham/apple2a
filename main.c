@@ -1,3 +1,5 @@
+#include <string.h>
+
 #include "exporter.h"
 #include "platform.h"
 #include "runtime.h"
@@ -46,40 +48,6 @@ void (*g_compiled_function)() = (void (*)()) g_compiled;
 // - Program line.
 // - Nul.
 uint8_t g_program[1024];
-
-
-/**
- * Copy a memory buffer. Source and destination may overlap.
- */
-static void memmove(uint8_t *dest, uint8_t *src, uint16_t count) {
-    // See if we overlap.
-    if (dest > src && dest < src + count) {
-        // Overlapping with src before dest, we have to copy backward.
-        dest += count;
-        src += count;
-        while (count-- > 0) {
-            *--dest = *--src;
-        }
-    } else {
-        // No overlap, or dest before src, which is fine.
-        while (count-- > 0) {
-            *dest++ = *src++;
-        }
-    }
-}
-
-/**
- * Get the length of a nul-terminated string.
- */
-static int16_t strlen(uint8_t *s) {
-    uint8_t *original = s;
-
-    while (*s != '\0') {
-        s += 1;
-    }
-
-    return s - original;
-}
 
 /**
  * Print the tokenized string, with tokens displayed as their full text.
@@ -189,20 +157,6 @@ static void add_call(void *function) {
 static void add_return() {
     g_compiled[g_compiled_length++] = I_RTS;
 }
-
-/**
- * Advance s over whitespace, which is just a space, returning
- * the new pointer.
- */
-/* Unused.
-static uint8_t *skip_whitespace(uint8_t *s) {
-    while (*s == ' ') {
-        s += 1;
-    }
-
-    return s;
-}
-*/
 
 /**
  * Parse an unsigned integer, returning the value and moving the pointer
@@ -421,7 +375,7 @@ static void process_input_buffer() {
         // Dump compiled buffer to the terminal.
         {
             int i;
-            volatile uint8_t *debug_port = (uint8_t *) 0xBFFE;
+            uint8_t *debug_port = (uint8_t *) 0xBFFE;
             debug_port[0] = g_compiled_length;
             for (i = 0; i < g_compiled_length; i++) {
                 debug_port[1] = g_compiled[i];
@@ -522,7 +476,7 @@ int16_t main(void)
     if (1) {
         int16_t i;
         for (i = 0; i < 256; i++) {
-            volatile uint8_t *loc;
+            uint8_t *loc;
             // Fails with: unhandled instruction B2
             move_cursor(i % 16, i >> 4);
             // Works.
@@ -540,6 +494,9 @@ int16_t main(void)
 
     // Prompt.
     print("\n\n]");
+    // TODO crashes 6502. Delete:
+    // asm("ldy #1");
+    // asm("sta $FFFF,y");
 
     // Keyboard input.
     blink = 0;
@@ -572,7 +529,7 @@ int16_t main(void)
                     }
                 } else if (key == 13) {
                     // Return.
-                    move_cursor(0, g_cursor_y + 1);
+                    print_char('\n');
 
                     process_input_buffer();
 
@@ -580,7 +537,7 @@ int16_t main(void)
                     g_input_buffer_length = 0;
                 } else {
                     if (g_input_buffer_length < sizeof(g_input_buffer) - 1) {
-                        volatile uint8_t *loc = cursor_pos();
+                        uint8_t *loc = cursor_pos();
                         *loc = key | 0x80;
                         move_cursor(g_cursor_x + 1, g_cursor_y);
 

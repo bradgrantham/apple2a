@@ -1,7 +1,9 @@
 
+#include <string.h>
 #include "runtime.h"
 
 #define CURSOR_GLYPH 127
+#define SCREEN_HEIGHT 24
 #define SCREEN_WIDTH 40
 #define SCREEN_STRIDE (3*SCREEN_WIDTH + 8)
 
@@ -14,13 +16,20 @@ uint16_t g_showing_cursor = 0;
 uint8_t g_cursor_ch = 0;
 
 /**
+ * Return the memory location of the zero-based (x,y) position on the screen.
+ */
+static uint8_t *screen_pos(uint16_t x, uint16_t y) {
+    int16_t block = y >> 3;
+    int16_t line = y & 0x07;
+
+    return TEXT_PAGE1_BASE + line*SCREEN_STRIDE + block*SCREEN_WIDTH + x;
+}
+
+/**
  * Return the memory location of the cursor.
  */
-volatile uint8_t *cursor_pos(void) {
-    int16_t block = g_cursor_y >> 3;
-    int16_t line = g_cursor_y & 0x07;
-
-    return TEXT_PAGE1_BASE + line*SCREEN_STRIDE + block*SCREEN_WIDTH + g_cursor_x;
+uint8_t *cursor_pos(void) {
+    return screen_pos(g_cursor_x, g_cursor_y);
 }
 
 /**
@@ -28,7 +37,7 @@ volatile uint8_t *cursor_pos(void) {
  */
 void show_cursor(void) {
     if (!g_showing_cursor) {
-        volatile uint8_t *pos = cursor_pos();
+        uint8_t *pos = cursor_pos();
         g_cursor_ch = *pos;
         *pos = CURSOR_GLYPH | 0x80;
         g_showing_cursor = 1;
@@ -40,7 +49,7 @@ void show_cursor(void) {
  */
 void hide_cursor(void) {
     if (g_showing_cursor) {
-        volatile uint8_t *pos = cursor_pos();
+        uint8_t *pos = cursor_pos();
         *pos = g_cursor_ch;
         g_showing_cursor = 0;
     }
@@ -60,27 +69,45 @@ void move_cursor(int16_t x, int16_t y) {
  * Clear the screen with non-reversed spaces.
  */
 void home(void) {
-    volatile uint8_t *p = TEXT_PAGE1_BASE;
-    uint8_t ch = ' ' | 0x80;
-    int16_t i;
+    memset(TEXT_PAGE1_BASE, ' ' | 0x80, SCREEN_STRIDE*8);
+    move_cursor(0, 0);
+}
 
-    // TODO: Could write these as words, not chars.
-    for (i = SCREEN_STRIDE*8; i >= 0; i--) {
-        *p++ = ch;
+/**
+ * Screen the screen up one line, blanking out the bottom
+ * row. Does not affect the cursor.
+ */
+static void scroll_up(void) {
+    int i;
+    uint8_t *previous_line = 0;
+
+    for (i = 0; i < SCREEN_HEIGHT; i++) {
+        uint8_t *this_line = screen_pos(0, i);
+        if (i > 0) {
+            memmove(previous_line, this_line, SCREEN_WIDTH);
+        }
+        previous_line = this_line;
     }
 
-    move_cursor(0, 0);
+    // This is provided by cc65:
+    memset(previous_line, ' ' | 0x80, SCREEN_WIDTH);
 }
 
 /**
  * Prints the character and advances the cursor. Handles newlines.
  */
 void print_char(uint8_t c) {
-    volatile uint8_t *loc = cursor_pos();
+    uint8_t *loc = cursor_pos();
 
     if (c == '\n') {
-        // TODO: Scroll.
-        move_cursor(0, g_cursor_y + 1);
+        if (g_cursor_y == SCREEN_HEIGHT - 1) {
+            // Scroll.
+            hide_cursor();
+            scroll_up();
+            move_cursor(0, g_cursor_y);
+        } else {
+            move_cursor(0, g_cursor_y + 1);
+        }
     } else {
         // Print character.
         *loc = c | 0x80;

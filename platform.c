@@ -1,7 +1,7 @@
 #include "platform.h"
 
-#define KBD_STATUS_OR_KEY ((volatile unsigned char *)0xC000)
-#define KBD_CLEAR_CURRENT_KEY ((volatile unsigned char *)0xC010)
+#define KBD_STATUS_OR_KEY ((unsigned char *)0xC000)
+#define KBD_CLEAR_CURRENT_KEY ((unsigned char *)0xC010)
 
 #define KEY_READY_MASK 0x80
 #define KEY_VALUE_MASK 0x7F

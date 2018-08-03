@@ -8,7 +8,7 @@ extern uint16_t g_cursor_y;
 extern uint16_t g_showing_cursor;
 extern uint8_t g_cursor_ch;
 
-volatile uint8_t *cursor_pos(void);
+uint8_t *cursor_pos(void);
 void show_cursor(void);
 void hide_cursor(void);
 void move_cursor(int16_t x, int16_t y);

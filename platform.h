@@ -1,8 +1,8 @@
 #ifndef __PLATFORM_H__
 #define __PLATFORM_H__
 
-#define TEXT_PAGE1_BASE ((volatile unsigned char *)0x400)
-#define TEXT_PAGE2_BASE ((volatile unsigned char *)0x800)
+#define TEXT_PAGE1_BASE ((unsigned char *)0x400)
+#define TEXT_PAGE2_BASE ((unsigned char *)0x800)
 
 // Standard types.
 typedef signed char int8_t;
