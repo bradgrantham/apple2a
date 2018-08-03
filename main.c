@@ -45,6 +45,13 @@ uint8_t title_length = 9;
 // Variable for "No more space for variables".
 #define OUT_OF_VARIABLE_SPACE 0xFF
 
+// Test for whether a character is a digit.
+#define IS_DIGIT(ch) ((ch) >= '0' && (ch) <= '9')
+
+// Test for first and subsequent variable name letters.
+#define IS_FIRST_VARIABLE_LETTER(ch) ((ch) >= 'A' && (ch) <= 'Z')
+#define IS_SUBSEQUENT_VARIABLE_LETTER(ch) (IS_FIRST_VARIABLE_LETTER(ch) || IS_DIGIT(ch))
+
 // List of tokens. The token value is the index plus 0x80.
 static uint8_t *TOKEN[] = {
     "HOME",
@@ -209,7 +216,7 @@ static uint16_t parse_uint16(uint8_t **s_ptr) {
     uint16_t value = 0;
     uint8_t *s = *s_ptr;
 
-    while (*s >= '0' && *s <= '9') {
+    while (IS_DIGIT(*s)) {
         value = value*10 + (*s - '0');
         s += 1;
     }
@@ -244,13 +251,13 @@ static uint8_t find_variable(uint8_t **buffer) {
 
     // Pull out the variable name.
     name[0] = *s++;
-    if (*s != 0 && (*s & 0x80) == 0) {
+    if (IS_SUBSEQUENT_VARIABLE_LETTER(*s)) {
         name[1] = *s++;
     } else {
         name[1] = 0;
     }
     // Skip rest of name.
-    while (*s != 0 && (*s & 0x80) == 0) {
+    while (IS_SUBSEQUENT_VARIABLE_LETTER(*s)) {
         s++;
     }
 
@@ -289,7 +296,7 @@ static uint8_t *compile_expression(uint8_t *s) {
     char have_value_in_ax = 0;
 
     while (1) {
-        if (*s >= '0' && *s <= '9') {
+        if (IS_DIGIT(*s)) {
             // Parse number.
             uint16_t value;
 
@@ -301,7 +308,7 @@ static uint8_t *compile_expression(uint8_t *s) {
             value = parse_uint16(&s);
             compile_load_ax(value);
             have_value_in_ax = 1;
-        } else if (*s >= 'A' && *s <= 'Z') {
+        } else if (IS_FIRST_VARIABLE_LETTER(*s)) {
             // Variable reference.
             uint8_t var = find_variable(&s);
 
@@ -348,7 +355,7 @@ static uint16_t tokenize(uint8_t *s) {
     int16_t line_number;
 
     // Parse optional line number.
-    if (*s >= '0' && *s <= '9') {
+    if (IS_DIGIT(*s)) {
         line_number = parse_uint16(&s);
     } else {
         line_number = INVALID_LINE_NUMBER;
@@ -428,7 +435,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
 
         if (*s == '\0' || *s == ':') {
             // Empty statement. We skip the colon below.
-        } else if (*s >= 'A' && *s <= 'Z') {
+        } else if (IS_FIRST_VARIABLE_LETTER(*s)) {
             // Must be variable assignment.
             uint8_t var = find_variable(&s);
             if (var == OUT_OF_VARIABLE_SPACE) {
