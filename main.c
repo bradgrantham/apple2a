@@ -11,6 +11,7 @@ uint8_t title_length = 9;
 #define I_CLC 0x18
 #define I_JSR 0x20
 #define I_SEC 0x38
+#define I_JMP_ABS 0x4C
 #define I_RTS 0x60
 #define I_STA_ZPG 0x85
 #define I_STX_ZPG 0x86
@@ -38,12 +39,16 @@ uint8_t title_length = 9;
 #define T_GREATER_THAN 0x8D
 #define T_EQUALS 0x8E
 #define T_LESS_THAN 0x8F
+#define T_GOTO 0x90
 
 // Line number used for "no line number".
 #define INVALID_LINE_NUMBER 0xFFFF
 
 // Variable for "No more space for variables".
 #define OUT_OF_VARIABLE_SPACE 0xFF
+
+// Maximum number of lines in stored program.
+#define MAX_LINES 128
 
 // Test for whether a character is a digit.
 #define IS_DIGIT(ch) ((ch) >= '0' && (ch) <= '9')
@@ -70,6 +75,7 @@ static uint8_t *TOKEN[] = {
     ">",
     "=",
     "<",
+    "GOTO",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -87,6 +93,12 @@ void (*g_compiled_function)() = (void (*)()) g_compiled;
 // - Program line.
 // - Nul.
 uint8_t g_program[1024];
+
+// Address of each line of code when compiled (for GOTO statements).
+// Each line takes two words: one for the line number and
+// one for the address in memory of the compiled code.
+uint16_t g_line_address[MAX_LINES*2];
+uint16_t g_line_address_count;
 
 /**
  * Print the tokenized string, with tokens displayed as their full text.
@@ -193,7 +205,7 @@ static uint8_t *skip_over(uint8_t *a, uint8_t *b) {
  * Add a function call to the compiled buffer.
  */
 static void add_call(void *function) {
-    uint16_t addr = (int16_t) function;
+    uint16_t addr = (uint16_t) function;
 
     g_compiled[g_compiled_length++] = I_JSR;
     g_compiled[g_compiled_length++] = addr & 0xFF;
@@ -285,6 +297,21 @@ static uint8_t find_variable(uint8_t **buffer) {
     }
 
     return (uint8_t) var;
+}
+
+/**
+ * Find the address of a line in the compiled buffer, or 0xFFFF if not found.
+ */
+static uint16_t find_line_address(uint16_t line_number) {
+    int i;
+
+    for (i = 0; i < g_line_address_count; i++) {
+        if (g_line_address[i*2] == line_number) {
+            return g_line_address[i*2 + 1];
+        }
+    }
+
+    return 0xFFFF;
 }
 
 /**
@@ -418,6 +445,7 @@ static uint8_t *find_line(uint16_t line_number) {
  */
 static void set_up_compile(void) {
     g_compiled_length = 0;
+    g_line_address_count = 0;
 }
 
 /**
@@ -490,6 +518,25 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                 g_compiled[g_compiled_length++] = 0;
                 g_compiled[g_compiled_length++] = I_STA_IND_Y;
                 g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
+            }
+        } else if (*s == T_GOTO) {
+            s += 1;
+
+            if (!IS_DIGIT(*s)) {
+                error = 1;
+            } else {
+                uint16_t target_line_number = parse_uint16(&s);
+                uint16_t addr = find_line_address(target_line_number);
+
+                if (addr == 0xFFFF) {
+                    // Line not found.
+                    // TODO better error message.
+                    error = 1;
+                } else {
+                    g_compiled[g_compiled_length++] = I_JMP_ABS;
+                    g_compiled[g_compiled_length++] = addr & 0xFF;
+                    g_compiled[g_compiled_length++] = addr >> 8;
+                }
             }
         } else {
             error = 1;
@@ -573,6 +620,17 @@ static void compile_stored_program(void) {
 
     while ((next_line = get_next_line(line)) != 0) {
         uint16_t line_number = get_line_number(line);
+
+        // Store address of line in compiled buffer.
+        if (g_line_address_count == MAX_LINES) {
+            // TODO not sure what to do here.
+            print("Program too large");
+            break;
+        } else {
+            g_line_address[g_line_address_count++] = line_number;
+            g_line_address[g_line_address_count++] = (uint16_t) (g_compiled + g_compiled_length);
+        }
+
         compile_buffer(line + 4, line_number);
 
         line = next_line;
