@@ -579,7 +579,12 @@ static void complete_compile_and_execute(void) {
         int i;
         uint8_t *debug_port = (uint8_t *) 0xBFFE;
 
-        debug_port[0] = g_compiled_length;
+        // Size of program (including initial address).
+        debug_port[0] = 2 + g_compiled_length;
+        // Address of program start, little endian.
+        debug_port[1] = ((uint16_t) &g_compiled[0]) & 0xFF;
+        debug_port[1] = ((uint16_t) &g_compiled[0]) >> 8;
+        // Program bytes.
         for (i = 0; i < g_compiled_length; i++) {
             debug_port[1] = g_compiled[i];
         }
