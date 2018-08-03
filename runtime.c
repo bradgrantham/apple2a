@@ -6,6 +6,7 @@
 #define SCREEN_HEIGHT 24
 #define SCREEN_WIDTH 40
 #define SCREEN_STRIDE (3*SCREEN_WIDTH + 8)
+#define CLEAR_CHAR (' ' | 0x80)
 
 // Location of cursor in logical screen space.
 uint16_t g_cursor_x = 0;
@@ -66,10 +67,21 @@ void move_cursor(int16_t x, int16_t y) {
 }
 
 /**
+ * Blanks out the rest of the line, from the cursor (inclusive) on.
+ * Does not move the cursor.
+ */
+void clear_to_eol(void) {
+    uint8_t *pos = cursor_pos();
+
+    hide_cursor();
+    memset(pos, CLEAR_CHAR, SCREEN_WIDTH - g_cursor_x);
+}
+
+/**
  * Clear the screen with non-reversed spaces.
  */
 void home(void) {
-    memset(TEXT_PAGE1_BASE, ' ' | 0x80, SCREEN_STRIDE*8);
+    memset(TEXT_PAGE1_BASE, CLEAR_CHAR, SCREEN_STRIDE*8);
     move_cursor(0, 0);
 }
 
@@ -90,7 +102,7 @@ static void scroll_up(void) {
     }
 
     // This is provided by cc65:
-    memset(previous_line, ' ' | 0x80, SCREEN_WIDTH);
+    memset(previous_line, CLEAR_CHAR, SCREEN_WIDTH);
 }
 
 /**

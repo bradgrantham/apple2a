@@ -13,6 +13,8 @@ void show_cursor(void);
 void hide_cursor(void);
 void move_cursor(int16_t x, int16_t y);
 
+void clear_to_eol(void);
+
 void home(void);
 
 void print(uint8_t *s);

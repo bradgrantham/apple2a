@@ -113,6 +113,8 @@ static void list_statement() {
     uint8_t *line = g_program;
     uint8_t *next_line;
 
+    print_newline();
+
     while ((next_line = get_next_line(line)) != 0) {
         print_int(get_line_number(line));
         print_char(' ');
@@ -529,6 +531,7 @@ int16_t main(void)
                     }
                 } else if (key == 13) {
                     // Return.
+                    clear_to_eol();
                     print_char('\n');
 
                     process_input_buffer();
