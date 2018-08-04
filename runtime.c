@@ -102,8 +102,18 @@ void clear_to_eol(void) {
  * Clear the screen with non-reversed spaces.
  */
 void home(void) {
-    memset(TEXT_PAGE1_BASE, CLEAR_CHAR, SCREEN_STRIDE*8);
-    move_cursor(0, 0);
+    if (g_gr_mode) {
+        int i;
+
+        for (i = MIXED_GRAPHICS_HEIGHT; i < SCREEN_HEIGHT; i++) {
+            memset(screen_pos(0, i), CLEAR_CHAR, SCREEN_WIDTH);
+        }
+
+        move_cursor(0, MIXED_GRAPHICS_HEIGHT);
+    } else {
+        memset(TEXT_PAGE1_BASE, CLEAR_CHAR, SCREEN_STRIDE*8);
+        move_cursor(0, 0);
+    }
 }
 
 /**
