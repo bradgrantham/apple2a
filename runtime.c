@@ -10,6 +10,13 @@
 #define MIXED_GRAPHICS_HEIGHT (SCREEN_HEIGHT - MIXED_TEXT_HEIGHT)
 #define CLEAR_CHAR (' ' | 0x80)
 
+#define TEXT_OFF_SWITCH ((uint8_t *) 49232U)
+#define TEXT_ON_SWITCH ((uint8_t *) 49233U)
+#define MIXED_OFF_SWITCH ((uint8_t *) 49234U)
+#define MIXED_ON_SWITCH ((uint8_t *) 49235U)
+#define HIRES_OFF_SWITCH ((uint8_t *) 49238U)
+#define HIRES_ON_SWITCH ((uint8_t *) 49239U)
+
 // Location of cursor in logical screen space.
 uint16_t g_cursor_x = 0;
 uint16_t g_cursor_y = 0;
@@ -239,11 +246,11 @@ void gr_statement(void) {
     if (!g_gr_mode) {
         int i;
         // Mixed text and lo-res graphics mode.
-        uint8_t *p = (uint8_t *) 49235U;
 
         hide_cursor();
 
-        *p = 0;
+        *TEXT_OFF_SWITCH = 0;
+        *MIXED_ON_SWITCH = 0;
 
         // Clear the graphics area.
         for (i = 0; i < MIXED_GRAPHICS_HEIGHT; i++) {
@@ -265,11 +272,9 @@ void gr_statement(void) {
 void text_statement(void) {
     if (g_gr_mode) {
         // Text mode.
-        uint8_t *p = (uint8_t *) 49233U;
+        *TEXT_ON_SWITCH = 0;
 
         hide_cursor();
-
-        *p = 0;
 
         g_gr_mode = 0;
     }
