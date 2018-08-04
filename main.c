@@ -69,6 +69,8 @@ uint8_t title_length = 9;
 #define OP_DIV 0xCB
 #define OP_NEG 0xDD
 #define OP_EXP 0xEE
+#define OP_CLOSE_PARENS 0xFD // Never on the stack.
+#define OP_OPEN_PARENS 0xFE // Ignore precedence.
 #define OP_INVALID 0xFF
 
 // Line number used for "no line number".
@@ -400,6 +402,14 @@ static void pop_operator_stack() {
         case OP_GTE:
             add_call(tosgeax);
             break;
+
+        case OP_OPEN_PARENS:
+            // No-op.
+            break;
+
+        default:
+            print("Unhandled operator\n");
+            break;
     }
 }
 
@@ -414,6 +424,7 @@ static void push_operator_stack(uint8_t op) {
     // All our operators are left-associative, so no special check for the case
     // of equal precedence.
     while (g_op_stack_size > 0 &&
+            g_op_stack[g_op_stack_size - 1] != OP_OPEN_PARENS &&
             OP_PRECEDENCE(g_op_stack[g_op_stack_size - 1]) >= OP_PRECEDENCE(op)) {
 
         pop_operator_stack();
@@ -505,20 +516,46 @@ static uint8_t *compile_expression(uint8_t *s) {
                 } else {
                     op = OP_GT;
                 }
+            } else if (*s == '(') { // Parentheses are not tokenized.
+                op = OP_OPEN_PARENS;
+            } else if (*s == ')') { // Parentheses are not tokenized.
+                op = OP_CLOSE_PARENS;
+
+                // Pop until open parethesis.
+                while (g_op_stack_size > 0 && g_op_stack[g_op_stack_size - 1] != OP_OPEN_PARENS) {
+                    pop_operator_stack();
+                }
+                if (g_op_stack_size == 0) {
+                    print("Extra close parenthesis\n");
+                } else {
+                    // Pop open parenthesis.
+                    pop_operator_stack();
+                }
             }
 
             if (op != OP_INVALID) {
                 s += 1;
-                push_operator_stack(op);
+                if (op != OP_CLOSE_PARENS) {
+                    push_operator_stack(op);
+                }
             } else {
                 break;
             }
         }
     }
 
-    // Empty the operator stack.
-    while (g_op_stack_size > 0) {
-        pop_operator_stack();
+    if (have_value_in_ax) {
+        // Empty the operator stack.
+        while (g_op_stack_size > 0) {
+            if (g_op_stack[g_op_stack_size - 1] == OP_OPEN_PARENS) {
+                print("Extra open parenthesis\n");
+            }
+            pop_operator_stack();
+        }
+    } else {
+        // Something went wrong, we never got anything.
+        print("Expression has no content\n");
+        compile_load_ax(0);
     }
 
     return s;
