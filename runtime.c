@@ -137,24 +137,37 @@ static void scroll_up(void) {
 }
 
 /**
+ * Print a single newline.
+ */
+void print_newline(void) {
+    if (g_cursor_y == SCREEN_HEIGHT - 1) {
+        // Scroll.
+        hide_cursor();
+        scroll_up();
+        move_cursor(0, g_cursor_y);
+    } else {
+        move_cursor(0, g_cursor_y + 1);
+    }
+}
+
+/**
  * Prints the character and advances the cursor. Handles newlines.
  */
 void print_char(uint8_t c) {
     uint8_t *loc = cursor_pos();
 
     if (c == '\n') {
-        if (g_cursor_y == SCREEN_HEIGHT - 1) {
-            // Scroll.
-            hide_cursor();
-            scroll_up();
-            move_cursor(0, g_cursor_y);
-        } else {
-            move_cursor(0, g_cursor_y + 1);
-        }
+        print_newline();
     } else {
         // Print character.
         *loc = c | 0x80;
-        move_cursor(g_cursor_x + 1, g_cursor_y);
+
+        // Advance cursor or wrap.
+        if (g_cursor_x == SCREEN_WIDTH - 1) {
+            print_newline();
+        } else {
+            move_cursor(g_cursor_x + 1, g_cursor_y);
+        }
     }
 }
 
@@ -202,13 +215,6 @@ void print_int(uint16_t i) {
 }
 
 /**
- * Print a single newline.
- */
-void print_newline(void) {
-    print_char('\n');
-}
-
-/**
  * Display a syntax error message.
  */
 void syntax_error(void) {
@@ -230,39 +236,43 @@ void syntax_error_in_line(uint16_t line_number) {
  * Switch to graphics mode.
  */
 void gr_statement(void) {
-    int i;
-    uint8_t *p = (uint8_t *) 49235U;
+    if (!g_gr_mode) {
+        int i;
+        // Mixed text and lo-res graphics mode.
+        uint8_t *p = (uint8_t *) 49235U;
 
-    hide_cursor();
+        hide_cursor();
 
-    // Mixed text and lo-res graphics mode.
-    *p = 0;
+        *p = 0;
 
-    // Clear the graphics area.
-    for (i = 0; i < MIXED_GRAPHICS_HEIGHT; i++) {
-        memset(screen_pos(0, i), 0, SCREEN_WIDTH);
+        // Clear the graphics area.
+        for (i = 0; i < MIXED_GRAPHICS_HEIGHT; i++) {
+            memset(screen_pos(0, i), 0, SCREEN_WIDTH);
+        }
+
+        // Move the cursor to the text window.
+        if (g_cursor_y < MIXED_GRAPHICS_HEIGHT) {
+            move_cursor(0, MIXED_GRAPHICS_HEIGHT);
+        }
+
+        g_gr_mode = 1;
     }
-
-    // Move the cursor to the text window.
-    if (g_cursor_y < MIXED_GRAPHICS_HEIGHT) {
-        move_cursor(0, MIXED_GRAPHICS_HEIGHT);
-    }
-
-    g_gr_mode = 1;
 }
 
 /**
  * Switch to text mode.
  */
 void text_statement(void) {
-    uint8_t *p = (uint8_t *) 49233U;
+    if (g_gr_mode) {
+        // Text mode.
+        uint8_t *p = (uint8_t *) 49233U;
 
-    hide_cursor();
+        hide_cursor();
 
-    // Mixed text and lo-res graphics mode.
-    *p = 0;
+        *p = 0;
 
-    g_gr_mode = 0;
+        g_gr_mode = 0;
+    }
 }
 
 /**

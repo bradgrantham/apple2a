@@ -124,7 +124,7 @@ static uint8_t *TOKEN[] = {
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
-uint8_t g_input_buffer[40];
+uint8_t g_input_buffer[80];
 int16_t g_input_buffer_length = 0;
 
 // Compiled binary.
@@ -1087,10 +1087,7 @@ int16_t main(void)
                     g_input_buffer_length = 0;
                 } else {
                     if (g_input_buffer_length < sizeof(g_input_buffer) - 1) {
-                        uint8_t *loc = cursor_pos();
-                        *loc = key | 0x80;
-                        move_cursor(g_cursor_x + 1, g_cursor_y);
-
+                        print_char(key);
                         g_input_buffer[g_input_buffer_length++] = key;
                     }
                 }
