@@ -45,6 +45,8 @@ uint8_t title_length = 9;
 #define T_GOTO 0x90
 #define T_IF 0x91
 #define T_THEN 0x92
+#define T_GR 0x93
+#define T_TEXT 0x94
 
 // Operators. These encode both the operator (high nybble) and the precedence
 // (low nybble). Lower precedence has a lower low nybble value. For example,
@@ -113,6 +115,8 @@ static uint8_t *TOKEN[] = {
     "GOTO",
     "IF",
     "THEN",
+    "GR",
+    "TEXT",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -761,6 +765,12 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                 g_compiled_length = saved_compiled_length;
                 error = 1;
             }
+        } else if (*s == T_GR) {
+            s += 1;
+            add_call(gr_statement);
+        } else if (*s == T_TEXT) {
+            s += 1;
+            add_call(text_statement);
         } else {
             error = 1;
         }

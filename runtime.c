@@ -6,6 +6,8 @@
 #define SCREEN_HEIGHT 24
 #define SCREEN_WIDTH 40
 #define SCREEN_STRIDE (3*SCREEN_WIDTH + 8)
+#define MIXED_TEXT_HEIGHT 4
+#define MIXED_GRAPHICS_HEIGHT (SCREEN_HEIGHT - MIXED_TEXT_HEIGHT)
 #define CLEAR_CHAR (' ' | 0x80)
 
 // Location of cursor in logical screen space.
@@ -15,6 +17,9 @@ uint16_t g_cursor_y = 0;
 uint16_t g_showing_cursor = 0;
 // Character at the cursor location.
 uint8_t g_cursor_ch = 0;
+
+// Whether in low-res graphics mode.
+uint8_t g_gr_mode = 0;
 
 // List of variable names, two bytes each, in the same order they are
 // in the zero page (starting at FIRST_VARIABLE). Two nuls means an unused
@@ -103,17 +108,17 @@ void home(void) {
  */
 static void scroll_up(void) {
     int i;
+    int first_line = g_gr_mode ? MIXED_GRAPHICS_HEIGHT : 0;
     uint8_t *previous_line = 0;
 
-    for (i = 0; i < SCREEN_HEIGHT; i++) {
+    for (i = first_line; i < SCREEN_HEIGHT; i++) {
         uint8_t *this_line = screen_pos(0, i);
-        if (i > 0) {
+        if (i > first_line) {
             memmove(previous_line, this_line, SCREEN_WIDTH);
         }
         previous_line = this_line;
     }
 
-    // This is provided by cc65:
     memset(previous_line, CLEAR_CHAR, SCREEN_WIDTH);
 }
 
@@ -205,4 +210,43 @@ void syntax_error_in_line(uint16_t line_number) {
     print_int(line_number);
 
     // No linefeed, assume prompt will do it.
+}
+
+/**
+ * Switch to graphics mode.
+ */
+void gr_statement(void) {
+    int i;
+    uint8_t *p = (uint8_t *) 49235U;
+
+    hide_cursor();
+
+    // Mixed text and lo-res graphics mode.
+    *p = 0;
+
+    // Clear the graphics area.
+    for (i = 0; i < MIXED_GRAPHICS_HEIGHT; i++) {
+        memset(screen_pos(0, i), 0, SCREEN_WIDTH);
+    }
+
+    // Move the cursor to the text window.
+    if (g_cursor_y < MIXED_GRAPHICS_HEIGHT) {
+        move_cursor(0, MIXED_GRAPHICS_HEIGHT);
+    }
+
+    g_gr_mode = 1;
+}
+
+/**
+ * Switch to text mode.
+ */
+void text_statement(void) {
+    uint8_t *p = (uint8_t *) 49233U;
+
+    hide_cursor();
+
+    // Mixed text and lo-res graphics mode.
+    *p = 0;
+
+    g_gr_mode = 0;
 }
