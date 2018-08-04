@@ -47,6 +47,8 @@ uint8_t title_length = 9;
 #define T_THEN 0x92
 #define T_GR 0x93
 #define T_TEXT 0x94
+#define T_COLOR 0x95
+#define T_PLOT 0x96
 
 // Operators. These encode both the operator (high nybble) and the precedence
 // (low nybble). Lower precedence has a lower low nybble value. For example,
@@ -117,6 +119,8 @@ static uint8_t *TOKEN[] = {
     "THEN",
     "GR",
     "TEXT",
+    "COLOR",
+    "PLOT",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -771,6 +775,26 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
         } else if (*s == T_TEXT) {
             s += 1;
             add_call(text_statement);
+        } else if (*s == T_COLOR) {
+            s += 1;
+            if (*s != T_EQUAL) {
+                error = 1;
+            } else {
+                s += 1;
+                s = compile_expression(s);
+                add_call(color_statement);
+            }
+        } else if (*s == T_PLOT) {
+            s += 1;
+            s = compile_expression(s);
+            add_call(pushax);
+            if (*s != ',') {
+                error = 1;
+            } else {
+                s += 1;
+                s = compile_expression(s);
+                add_call(plot_statement);
+            }
         } else {
             error = 1;
         }
@@ -980,6 +1004,7 @@ int16_t main(void)
 {
     int16_t blink;
 
+    /*
        // For testing generated code. TODO remove
     {
         int16_t a, b, c;
@@ -987,6 +1012,7 @@ int16_t main(void)
         c = 6;
         a = b == c;
     }
+    */
 
     // Clear stored program.
     new_statement();

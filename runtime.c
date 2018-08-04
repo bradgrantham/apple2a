@@ -21,6 +21,10 @@ uint8_t g_cursor_ch = 0;
 // Whether in low-res graphics mode.
 uint8_t g_gr_mode = 0;
 
+// 4-bit low-res color.
+uint8_t g_gr_color_high = 0; // High nybble.
+uint8_t g_gr_color_low = 0;  // Low nybble.
+
 // List of variable names, two bytes each, in the same order they are
 // in the zero page (starting at FIRST_VARIABLE). Two nuls means an unused
 // slot. One-letter variable names have a nul for the second character.
@@ -249,4 +253,27 @@ void text_statement(void) {
     *p = 0;
 
     g_gr_mode = 0;
+}
+
+/**
+ * Set the low-res color.
+ */
+void color_statement(uint16_t color) {
+    g_gr_color_high = (uint8_t) ((color << 4) & 0xF0);
+    g_gr_color_low = (uint8_t) (color & 0x0F);
+}
+
+/**
+ * Plot a pixel in low-res graphics mode.
+ */
+void plot_statement(uint16_t x, uint16_t y) {
+    uint8_t *pos = screen_pos(x, y >> 1);
+
+    if ((y & 1) == 0) {
+        // Even, bottom pixel.
+        *pos = (*pos & 0xF0) | g_gr_color_low;
+    } else {
+        // Odd, top pixel.
+        *pos = (*pos & 0x0F) | g_gr_color_high;
+    }
 }
