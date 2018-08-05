@@ -516,6 +516,10 @@ static void pop_operator_stack() {
             add_call(bnegax);
             break;
 
+        case OP_NEG:
+            add_call(negax);
+            break;
+
         case OP_OPEN_PARENS:
             // No-op.
             break;
@@ -535,7 +539,7 @@ static void pop_operator_stack() {
  */
 static void push_operator_stack(uint8_t op) {
     // Don't pop anything off if op is unary.
-    if (op != OP_NOT) {
+    if (op != OP_NOT && op != OP_NEG) {
         // All our operators are left-associative, so no special check for the case
         // of equal precedence.
         while (g_op_stack_size > 0 &&
@@ -556,6 +560,7 @@ static void push_operator_stack(uint8_t op) {
  */
 static uint8_t *compile_expression(uint8_t *s) {
     char have_value_in_ax = 0;
+    uint8_t expect_unary_minus = 1; // Expect unary minus at start of expression.
 
     while (1) {
         if (IS_DIGIT(*s)) {
@@ -567,6 +572,9 @@ static uint8_t *compile_expression(uint8_t *s) {
 
             compile_load_ax(parse_uint16(&s));
             have_value_in_ax = 1;
+
+            // Expect binary minus after operand.
+            expect_unary_minus = 0;
         } else if (IS_FIRST_VARIABLE_LETTER(*s)) {
             // Variable reference.
             uint8_t var = find_variable(&s);
@@ -590,6 +598,9 @@ static uint8_t *compile_expression(uint8_t *s) {
                 g_c += 4;
             }
             have_value_in_ax = 1;
+
+            // Expect binary minus after operand.
+            expect_unary_minus = 0;
         } else {
             // Check if it's an operator.
             uint8_t op = OP_INVALID;
@@ -597,8 +608,7 @@ static uint8_t *compile_expression(uint8_t *s) {
             if (*s == T_PLUS) {
                 op = OP_ADD;
             } else if (*s == T_MINUS) {
-                // TODO check for unary.
-                op = OP_SUB;
+                op = expect_unary_minus ? OP_NEG : OP_SUB;
             } else if (*s == T_ASTERISK) {
                 op = OP_MULT;
             } else if (*s == T_SLASH) {
@@ -655,6 +665,10 @@ static uint8_t *compile_expression(uint8_t *s) {
                     pop_operator_stack();
                 }
             }
+
+            // Expect unary minus after operators or open parenthesis. Expect
+            // binary minus after close parenthesis.
+            expect_unary_minus = op != OP_CLOSE_PARENS;
 
             if (op != OP_INVALID) {
                 s += 1;

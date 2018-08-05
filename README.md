@@ -9,8 +9,8 @@ line numbers, 16-bit integer variables, `HOME`, `PRINT`, `IF/THEN`,
 `FOR/NEXT`, `GOTO`, low-res graphics (`GR`, `PLOT`, `COLOR=`, `TEXT`),
 `POKE`, and integer and boolean arithmetic.
 
-Not supported: Floating point, strings, negative
-integers, high-res graphics, `DATA/READ/RESUME`, `GOSUB/RETURN/POP`,
+Not supported: Floating point, strings,
+high-res graphics, `DATA/READ/RESUME`, `GOSUB/RETURN/POP`,
 `DIM` (arrays), `REM`, keyboard input, exponentiation (`A^B`), and cassette I/O.
 
 # Dependencies

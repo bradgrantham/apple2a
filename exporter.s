@@ -31,6 +31,8 @@
 .export     _tosgeax := tosgeax
 .import     bnegax
 .export     _bnegax := bnegax
+.import     negax
+.export     _negax := negax
 
 .importzp   ptr1
 .exportzp   _ptr1 = ptr1
