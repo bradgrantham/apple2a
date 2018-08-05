@@ -2,6 +2,9 @@
 #include <string.h>
 #include "runtime.h"
 
+// Max number of nested FOR loops. This value matches AppleSoft BASIC.
+#define MAX_FOR 10
+
 #define CURSOR_GLYPH 127
 #define SCREEN_HEIGHT 24
 #define SCREEN_WIDTH 40
@@ -16,6 +19,23 @@
 #define MIXED_ON_SWITCH ((uint8_t *) 49235U)
 #define HIRES_OFF_SWITCH ((uint8_t *) 49238U)
 #define HIRES_ON_SWITCH ((uint8_t *) 49239U)
+
+/**
+ * Run-time stack of FOR loops.
+ */
+typedef struct {
+    // Address (in the zero page) of the loop variable.
+    uint8_t var_address;
+
+    // End value.
+    int16_t end_value;
+
+    // Step.
+    int16_t step;
+
+    // Address of the top of the loop to jump back to.
+    uint16_t loop_top_addr;
+} ForInfo;
 
 // Location of cursor in logical screen space.
 uint16_t g_cursor_x = 0;
@@ -37,11 +57,24 @@ uint8_t g_gr_color_low = 0;  // Low nybble.
 // slot. One-letter variable names have a nul for the second character.
 uint8_t g_variable_names[MAX_VARIABLES*2];
 
+// Stack of FOR loops.
+ForInfo g_for_info[MAX_FOR];
+uint8_t g_for_count;
+
 /**
- * Clear out the values of all variables.
+ * Clear the FOR stack.
  */
-void clear_variable_values(void) {
+void clear_for_stack(void) {
+    g_for_count = 0;
+}
+
+/**
+ * Clear out the values of all variables and generally initialize runtime
+ * state.
+ */
+void initialize_runtime(void) {
     memset((void *) FIRST_VARIABLE, 0, MAX_VARIABLES*2);
+    clear_for_stack();
 }
 
 /**
@@ -222,29 +255,46 @@ void print_int(uint16_t i) {
 }
 
 /**
- * Display a syntax error message.
+ * Print an error message, optionally with a line number if it's
+ * not INVALID_LINE_NUMBER.
  */
-void syntax_error(void) {
-    print("\n?SYNTAX ERROR");
-    // No linefeed, assume prompt will do it.
+static void generic_error_message(uint8_t *message, uint16_t line_number) {
+    print("\n?");
+    print(message);
+
+    if (line_number != INVALID_LINE_NUMBER) {
+        print(" IN ");
+        print_int(line_number);
+    }
 }
 
 /**
- * Display a syntax error message for stored program.
+ * Display a syntax error message.
  */
-void syntax_error_in_line(uint16_t line_number) {
-    print("\n?SYNTAX ERROR IN ");
-    print_int(line_number);
-
-    // No linefeed, assume prompt will do it.
+void syntax_error(uint16_t line_number) {
+    generic_error_message("SYNTAX ERROR", line_number);
 }
 
 /**
  * Display an error for a GOTO that went to a line that doesn't exist.
  */
 void undefined_statement_error(uint16_t line_number) {
-    print("\n?UNDEF'D STATEMENT ERROR IN ");
-    print_int(line_number);
+    generic_error_message("UNDEF'D STATEMENT ERROR", line_number);
+}
+
+/**
+ * Display an out-of-memory error, which could also mean that various
+ * stacks have been overflowed.
+ */
+void out_of_memory_error(uint16_t line_number) {
+    generic_error_message("OUT OF MEMORY ERROR", line_number);
+}
+
+/**
+ * Display an error for when the user does a NEXT without a matching FOR.
+ */
+void next_without_for_error(uint16_t line_number) {
+    generic_error_message("NEXT WITHOUT FOR ERROR", line_number);
 }
 
 /**
@@ -309,4 +359,108 @@ void plot_statement(uint16_t x, uint16_t y) {
         // Odd, top pixel.
         *pos = (*pos & 0x0F) | g_gr_color_high;
     }
+}
+
+/**
+ * Find a FOR loop info structure by variable address, or null if not found.
+ */
+static ForInfo *find_for_info(uint16_t var_address) {
+    int i;
+    ForInfo *f;
+
+    for (i = 0; i < g_for_count; i++) {
+        f = &g_for_info[i];
+
+        if (f->var_address == var_address) {
+            // Found it.
+            return f;
+        }
+    }
+
+    return 0;
+}
+
+/**
+ * Remove any FOR loop for this variable anywhere in the stack, if any.
+ */
+static void remove_for_info(uint16_t var_address) {
+    ForInfo *f = find_for_info(var_address);
+
+    if (f != 0) {
+        // Compute the index of this entry.
+        int index = f - g_for_info;
+
+        // Shift the rest over.
+        memmove(f, f + 1, sizeof(ForInfo)*(g_for_count - index - 1));
+        g_for_count -= 1;
+    }
+}
+
+/**
+ * Push a FOR statement on the stack.
+ */
+void for_statement(uint16_t line_number, uint16_t var_address, int16_t end_value, int16_t step,
+        uint16_t loop_top_addr) {
+
+    // First, kill any existing loop for this variable.
+    remove_for_info(var_address);
+
+    // Add the loop to our stack.
+    if (g_for_count == MAX_FOR) {
+        // TODO should quit program. Return a failure value, and have called return.
+        out_of_memory_error(line_number);
+    } else {
+        ForInfo *f = &g_for_info[g_for_count++];
+
+        f->var_address = var_address;
+        f->end_value = end_value;
+        f->step = step;
+        f->loop_top_addr = loop_top_addr;
+    }
+}
+
+/**
+ * Handle a NEXT statement. Returns the address to jump to at the top of the loop,
+ * or zero to not jump.
+ */
+uint16_t next_statement(uint16_t line_number, uint16_t var_address) {
+    ForInfo *f;
+    uint16_t jump_addr = 0;
+
+    if (var_address == 0) {
+        // Pick top of stack.
+        if (g_for_count == 0) {
+            // Stack is empty.
+            f = 0;
+        } else {
+            f = &g_for_info[g_for_count - 1];
+        }
+    } else {
+        f = find_for_info(var_address);
+    }
+
+    if (f == 0) {
+        next_without_for_error(line_number);
+    } else {
+        uint16_t *var;
+
+        // Pop off every loop below us in the stack.
+        g_for_count = f - g_for_info + 1;
+
+        // Step the loop variable.
+        var = (uint16_t *) f->var_address;
+        *var += f->step;
+        // TODO if the step is negative, switch inequality here:
+        if (*var > f->end_value) {
+            // We're done, remove our FOR loop.
+            g_for_count -= 1;
+
+            // Continue after the NEXT statement.
+        } else {
+            // Loop back to the top of the NEXT statement.
+            jump_addr = f->loop_top_addr;
+        }
+    }
+
+    return jump_addr;
 }

@@ -14,6 +14,7 @@ uint8_t title_length = 9;
 #define I_SEC 0x38
 #define I_JMP_ABS 0x4C
 #define I_RTS 0x60
+#define I_JMP_IND 0x6C
 #define I_STA_ZPG 0x85
 #define I_STX_ZPG 0x86
 #define I_STA_IND_Y 0x91
@@ -22,6 +23,7 @@ uint8_t title_length = 9;
 #define I_LDA_ZPG 0xA5
 #define I_LDX_ZPG 0xA6
 #define I_LDA_IMM 0xA9
+#define I_TAX 0xAA
 #define I_BNE_REL 0xD0
 #define I_BEQ_REL 0xF0
 
@@ -49,6 +51,10 @@ uint8_t title_length = 9;
 #define T_TEXT 0x94
 #define T_COLOR 0x95
 #define T_PLOT 0x96
+#define T_FOR 0x97
+#define T_TO 0x98
+#define T_STEP 0x99
+#define T_NEXT 0x9A
 
 // Operators. These encode both the operator (high nybble) and the precedence
 // (low nybble). Lower precedence has a lower low nybble value. For example,
@@ -76,9 +82,6 @@ uint8_t title_length = 9;
 #define OP_CLOSE_PARENS 0xFD // Never on the stack.
 #define OP_OPEN_PARENS 0xFE // Ignore precedence.
 #define OP_INVALID 0xFF
-
-// Line number used for "no line number".
-#define INVALID_LINE_NUMBER 0xFFFF
 
 // Variable for "No more space for variables".
 #define OUT_OF_VARIABLE_SPACE 0xFF
@@ -146,6 +149,10 @@ static uint8_t *TOKEN[] = {
     "TEXT",
     "COLOR",
     "PLOT",
+    "FOR",
+    "TO",
+    "STEP",
+    "NEXT",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -778,7 +785,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                     error = 1;
                 } else {
                     s += 1;
-                    // Parse address.
+                    // Parse value.
                     s = compile_expression(s);
                     // Copy to var.
                     g_compiled[g_compiled_length++] = I_STA_ZPG;
@@ -818,9 +825,9 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                 s++;
                 // Parse value. LSB is in A.
                 s = compile_expression(s);
-                g_compiled[g_compiled_length++] = I_LDY_IMM;
+                g_compiled[g_compiled_length++] = I_LDY_IMM;        // Zero out Y.
                 g_compiled[g_compiled_length++] = 0;
-                g_compiled[g_compiled_length++] = I_STA_IND_Y;
+                g_compiled[g_compiled_length++] = I_STA_IND_Y;      // Store at *ptr1.
                 g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
             }
         } else if (*s == T_GOTO) {
@@ -877,6 +884,125 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                 g_compiled_length = saved_compiled_length;
                 error = 1;
             }
+        } else if (*s == T_FOR) {
+            uint8_t *loop_top_addr_addr = 0;
+
+            s += 1;
+
+            // We'll set this to 0 if we succeed.
+            error = 1;
+
+            if (IS_FIRST_VARIABLE_LETTER(*s)) {
+                uint8_t var;
+
+                // For the error message.
+                compile_load_ax(line_number);
+                add_call(pushax);
+
+                var = find_variable(&s);
+                if (var == OUT_OF_VARIABLE_SPACE) {
+                    // TODO: Nicer error specifically for out of variable space.
+                } else {
+                    compile_load_ax(var);
+                    add_call(pushax);
+
+                    if (*s == T_EQUAL) {
+                        s += 1;
+
+                        // Parse initial value.
+                        s = compile_expression(s);
+
+                        // Copy to var.
+                        g_compiled[g_compiled_length++] = I_STA_ZPG;
+                        g_compiled[g_compiled_length++] = var;
+                        g_compiled[g_compiled_length++] = I_STX_ZPG;
+                        g_compiled[g_compiled_length++] = var + 1;
+
+                        if (*s == T_TO) {
+                            s += 1;
+
+                            // Parse end value.
+                            s = compile_expression(s);
+                            add_call(pushax);
+
+                            if (*s == T_STEP) {
+                                s += 1;
+
+                                // Parse step.
+                                s = compile_expression(s);
+                            } else {
+                                // Default to step of 1.
+                                compile_load_ax(1);
+                            }
+                            add_call(pushax);
+
+                            // Finally, the address at the top of the FOR loop.
+                            // We don't have it yet, so we leave space and record
+                            // the location where the NEXT should jump to.
+                            // Don't use compile_load_ax() here because a change
+                            // there would mess up how we fill it in below. Inline
+                            // it here so we have control over that.
+                            loop_top_addr_addr = &g_compiled[g_compiled_length];
+                            g_compiled[g_compiled_length++] = I_LDX_IMM;
+                            g_compiled_length++;
+                            g_compiled[g_compiled_length++] = I_LDA_IMM;
+                            g_compiled_length++;
+
+                            add_call(for_statement);
+                            error = 0;
+                        }
+                    }
+                }
+            }
+
+            if (loop_top_addr_addr != 0) {
+                uint16_t loop_top_addr = (uint16_t) &g_compiled[g_compiled_length];
+                loop_top_addr_addr[1] = loop_top_addr >> 8;     // X
+                loop_top_addr_addr[3] = loop_top_addr & 0xFF;   // A
+            }
+        } else if (*s == T_NEXT) {
+            s += 1;
+
+            // For the error message.
+            compile_load_ax(line_number);
+            add_call(pushax);
+
+            // See if there's the optional variable. We don't support multiple
+            // variables ("NEXT I,J").
+            if (IS_FIRST_VARIABLE_LETTER(*s)) {
+                uint8_t var = find_variable(&s);
+                if (var == OUT_OF_VARIABLE_SPACE) {
+                    // TODO: Nicer error specifically for out of variable space.
+                    error = 1;
+                } else {
+                    compile_load_ax(var);
+                }
+            } else {
+                // Zero means find the most recent FOR loop.
+                compile_load_ax(0);
+            }
+
+            // Process the NEXT instruction.
+            add_call(next_statement);
+
+            // The next_statement() function returns the address to jump
+            // to if we're looping, or 0 if we're not.
+
+            // Copy from AX to ptr1. We must save it because checking it destroys it.
+            g_compiled[g_compiled_length++] = I_STA_ZPG;
+            g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
+            g_compiled[g_compiled_length++] = I_STX_ZPG;
+            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 + 1;
+            // Check if AX is zero. Destroys AX.
+            g_compiled[g_compiled_length++] = I_ORA_ZPG;
+            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 + 1;  // OR X into A.
+            // If zero, skip over jump.
+            g_compiled[g_compiled_length++] = I_BEQ_REL;
+            g_compiled[g_compiled_length++] = 3;                    // Skip over indirect jump.
+            // Jump to top of loop, indirectly through ptr1, which has the address.
+            g_compiled[g_compiled_length++] = I_JMP_IND;
+            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 & 0x0F;
+            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 >> 8;
         } else if (*s == T_GR) {
             s += 1;
             add_call(gr_statement);
@@ -926,15 +1052,10 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
 
         if (error) {
             end_of_line_count = 0;
-            if (line_number != INVALID_LINE_NUMBER) {
-                compile_load_ax(line_number);
-                add_call(syntax_error_in_line);
-            } else {
-                add_call(syntax_error);
-            }
+            compile_load_ax(line_number);
+            add_call(syntax_error);
+
             // Terminate program.
-            // TODO This won't work after a GOSUB. Maybe we should have our
-            // own stack for that.
             add_return();
         }
     } while (!done);
@@ -954,6 +1075,10 @@ static void complete_compile_and_execute(void) {
     // Return from function.
     add_return();
 
+    // Always clear the FOR stack before running. We don't want it
+    // either in stored program mode, or in immediate mode.
+    clear_for_stack();
+
     // Forward GOTOs that couldn't be resolved are changed to
     // jumps to error messages.
     for (i = 0; i < g_forward_goto_count; i++) {
@@ -967,6 +1092,7 @@ static void complete_compile_and_execute(void) {
         // Add code at end of buffer to show error.
         compile_load_ax(f->source_line_number);
         add_call(undefined_statement_error);
+
         // Terminate program.
         add_return();
     }
@@ -1016,9 +1142,8 @@ static void compile_stored_program(void) {
 
     set_up_compile();
 
-    // Generate code to zero out all variable values. Do this in the program
-    // itself because each RUN should clear them out.
-    add_call(clear_variable_values);
+    // Clear runtime state.
+    add_call(initialize_runtime);
 
     while ((next_line = get_next_line(line)) != 0) {
         uint16_t line_number = get_line_number(line);

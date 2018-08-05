@@ -3,6 +3,9 @@
 
 #include "platform.h"
 
+// Line number used for "no line number".
+#define INVALID_LINE_NUMBER 0xFFFF
+
 // Maximum number of variables. These fit in the zero page.
 #define MAX_VARIABLES 16
 
@@ -17,7 +20,8 @@ extern uint16_t g_showing_cursor;
 extern uint8_t g_cursor_ch;
 extern uint8_t g_variable_names[MAX_VARIABLES*2];
 
-void clear_variable_values(void);
+void initialize_runtime(void);
+void clear_for_stack(void);
 
 uint8_t *cursor_pos(void);
 void show_cursor(void);
@@ -33,7 +37,11 @@ void print_char(uint8_t c);
 void print_int(uint16_t i);
 void print_newline(void);
 
-void syntax_error(void);
+void for_statement(uint16_t line_number, uint16_t var_address, int16_t end_value, int16_t step,
+        uint16_t loop_top_addr);
+uint16_t next_statement(uint16_t line_number, uint16_t var_address);
+
+void syntax_error(uint16_t line_number);
 void syntax_error_in_line(uint16_t line_number);
 void undefined_statement_error(uint16_t line_number);
 
