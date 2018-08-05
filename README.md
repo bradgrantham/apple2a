@@ -11,7 +11,7 @@ line numbers, 16-bit integer variables, `HOME`, `PRINT`, `IF/THEN`,
 
 Not supported: Floating point, strings, `AND`, `OR`, `NOT`, negative
 integers, high-res graphics, `DATA/READ/RESUME`, `GOSUB/RETURN/POP`,
-keyboard input, and cassette I/O.
+`DIM` (arrays), `REM`, keyboard input, and cassette I/O.
 
 # Dependencies
 
