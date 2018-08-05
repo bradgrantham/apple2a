@@ -89,12 +89,37 @@ uint8_t title_length = 9;
 // Maximum number of operators in the operator stack.
 #define MAX_OP_STACK 16
 
+// Maximum number of forward GOTOs.
+#define MAX_FORWARD_GOTO 16
+
 // Test for whether a character is a digit.
 #define IS_DIGIT(ch) ((ch) >= '0' && (ch) <= '9')
 
 // Test for first and subsequent variable name letters.
 #define IS_FIRST_VARIABLE_LETTER(ch) ((ch) >= 'A' && (ch) <= 'Z')
 #define IS_SUBSEQUENT_VARIABLE_LETTER(ch) (IS_FIRST_VARIABLE_LETTER(ch) || IS_DIGIT(ch))
+
+// Info for each "forward GOTO", which is a GOTO to a line that we've
+// not compiled yet.
+typedef struct {
+    // The line number the GOTO is on. This is for error messages.
+    uint16_t source_line_number;
+
+    // The line number it's trying to jump to.
+    uint16_t target_line_number;
+
+    // The address of the JMP instructions. This is 0 if this entry is unused.
+    uint8_t *jmp_address;
+} ForwardGoto;
+
+// Info for each compiled line.
+typedef struct {
+    // The line's number.
+    uint16_t line_number;
+
+    // The address in memory where its code was compiled.
+    uint8_t *code;
+} LineInfo;
 
 // List of tokens. The token value is the index plus 0x80.
 static uint8_t *TOKEN[] = {
@@ -139,16 +164,19 @@ void (*g_compiled_function)() = (void (*)()) g_compiled;
 // - Nul.
 uint8_t g_program[1024];
 
-// Address of each line of code when compiled (for GOTO statements).
-// Each line takes two words: one for the line number and
-// one for the address in memory of the compiled code.
-uint16_t g_line_address[MAX_LINES*2];
-uint16_t g_line_address_count;
+// Info about each compiled line.
+LineInfo g_line_info[MAX_LINES];
+uint8_t g_line_info_count;
 
 // Operator stack, of the expression-evaluation routines. These are from the
 // OP_ constants.
 uint8_t g_op_stack[MAX_OP_STACK];
 uint8_t g_op_stack_size = 0;
+
+// List of all forward GOTOs. These are packed at the beginning, so the
+// first invalid (jmp_address == 0) entry marks the end.
+ForwardGoto g_forward_goto[MAX_FORWARD_GOTO];
+uint8_t g_forward_goto_count = 0;
 
 /**
  * Print the tokenized string, with tokens displayed as their full text.
@@ -350,18 +378,20 @@ static uint8_t find_variable(uint8_t **buffer) {
 }
 
 /**
- * Find the address of a line in the compiled buffer, or 0xFFFF if not found.
+ * Find the address of a line in the compiled buffer, or 0 if not found.
  */
-static uint16_t find_line_address(uint16_t line_number) {
+static uint8_t *find_line_address(uint16_t line_number) {
     int i;
 
-    for (i = 0; i < g_line_address_count; i++) {
-        if (g_line_address[i*2] == line_number) {
-            return g_line_address[i*2 + 1];
+    for (i = 0; i < g_line_info_count; i++) {
+        LineInfo *l = &g_line_info[i];
+
+        if (l->line_number == line_number) {
+            return l->code;
         }
     }
 
-    return 0xFFFF;
+    return 0;
 }
 
 /**
@@ -593,6 +623,7 @@ static uint16_t tokenize(uint8_t *s) {
             int16_t i;
             uint8_t *skipped = 0;
 
+            // Try every token.
             for (i = 0; i < TOKEN_COUNT; i++) {
                 skipped = skip_over(s, TOKEN[i]);
                 if (skipped != 0) {
@@ -637,11 +668,83 @@ static uint8_t *find_line(uint16_t line_number) {
 }
 
 /**
+ * Adds a new entry to the list for forward GOTOs. Returns whether successful.
+ */
+static uint8_t add_forward_goto(uint16_t source_line_number, uint16_t target_line_number,
+        uint8_t *jmp_address) {
+
+    ForwardGoto *f;
+
+    if (g_forward_goto_count == MAX_FORWARD_GOTO) {
+        return 0;
+    }
+
+    f = &g_forward_goto[g_forward_goto_count++];
+    f->source_line_number = source_line_number;
+    f->target_line_number = target_line_number;
+    f->jmp_address = jmp_address;
+
+    return 1;
+}
+
+/**
+ * Go through the list of forward GOTOs and set their jumps to this code.
+ */
+static void fix_up_forward_gotos(uint16_t line_number, uint8_t *code) {
+    int i;
+    ForwardGoto *f;
+    uint16_t addr = (uint16_t) code;
+
+    for (i = 0; i < g_forward_goto_count; i++) {
+        f = &g_forward_goto[i];
+
+        if (f->target_line_number == line_number) {
+            // Fill in jump address.
+            f->jmp_address[1] = addr & 0xFF;
+            f->jmp_address[2] = addr >> 8;
+
+            // Swap last entry with this one. It's okay if these
+            // are the same entry.
+            *f = g_forward_goto[g_forward_goto_count - 1];
+
+            // Reduce size of array.
+            g_forward_goto_count -= 1;
+
+            // Re-process this entry, since we've swapped it.
+            i -= 1;
+        }
+    }
+}
+
+/**
+ * Adds an entry to the list of line infos. Returns whether successful.
+ */
+static uint8_t add_line_info(uint16_t line_number, uint8_t *code) {
+    LineInfo *l;
+
+    if (g_line_info_count == MAX_LINES) {
+        // TODO not sure what to do here.
+        print("Program too large");
+        return 0;
+    }
+
+    l = &g_line_info[g_line_info_count++];
+    l->line_number = line_number;
+    l->code = code;
+
+    // Fix up any forward GOTOs to this line.
+    fix_up_forward_gotos(line_number, code);
+
+    return 1;
+}
+
+/**
  * Call to configure the compilation step.
  */
 static void set_up_compile(void) {
     g_compiled_length = 0;
-    g_line_address_count = 0;
+    g_line_info_count = 0;
+    g_forward_goto_count = 0;
 }
 
 /**
@@ -726,17 +829,21 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                 error = 1;
             } else {
                 uint16_t target_line_number = parse_uint16(&s);
-                uint16_t addr = find_line_address(target_line_number);
+                uint16_t addr = (uint16_t) find_line_address(target_line_number);
 
-                if (addr == 0xFFFF) {
-                    // Line not found.
-                    // TODO better error message.
-                    error = 1;
-                } else {
-                    g_compiled[g_compiled_length++] = I_JMP_ABS;
-                    g_compiled[g_compiled_length++] = addr & 0xFF;
-                    g_compiled[g_compiled_length++] = addr >> 8;
+                if (addr == 0) {
+                    // Line not found. Must be a forward GOTO. Record it
+                    // and keep going.
+                    uint8_t success = add_forward_goto(line_number, target_line_number,
+                            &g_compiled[g_compiled_length]);
+                    if (!success) {
+                        // TODO handle error.
+                    }
                 }
+
+                g_compiled[g_compiled_length++] = I_JMP_ABS;
+                g_compiled[g_compiled_length++] = addr & 0xFF;
+                g_compiled[g_compiled_length++] = addr >> 8;
             }
         } else if (*s == T_IF) {
             uint16_t saved_compiled_length = g_compiled_length;
@@ -824,6 +931,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             } else {
                 add_call(syntax_error);
             }
+            // Terminate program.
             // TODO This won't work after a GOSUB. Maybe we should have our
             // own stack for that.
             add_return();
@@ -840,11 +948,30 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
  * Complete the compilation buffer and run it.
  */
 static void complete_compile_and_execute(void) {
+    int i;
+
     // Return from function.
     add_return();
 
+    // Forward GOTOs that couldn't be resolved are changed to
+    // jumps to error messages.
+    for (i = 0; i < g_forward_goto_count; i++) {
+        ForwardGoto *f = &g_forward_goto[i];
+        uint16_t addr = (uint16_t) &g_compiled[g_compiled_length];
+
+        // Jump to end of buffer.
+        f->jmp_address[1] = addr & 0xFF;
+        f->jmp_address[2] = addr >> 8;
+
+        // Add code at end of buffer to show error.
+        compile_load_ax(f->source_line_number);
+        add_call(undefined_statement_error);
+        // Terminate program.
+        add_return();
+    }
+
     // Dump compiled buffer to the terminal.
-    {
+    if (1) {
         int i;
         uint8_t *debug_port = (uint8_t *) 0xBFFE;
 
@@ -894,21 +1021,14 @@ static void compile_stored_program(void) {
 
     while ((next_line = get_next_line(line)) != 0) {
         uint16_t line_number = get_line_number(line);
+        uint8_t success = add_line_info(line_number, g_compiled + g_compiled_length);
 
-        // Store address of line in compiled buffer.
-        if (g_line_address_count == MAX_LINES) {
-            // TODO not sure what to do here.
-            print("Program too large");
-            break;
-        } else {
-            g_line_address[g_line_address_count++] = line_number;
-            g_line_address[g_line_address_count++] = (uint16_t) (g_compiled + g_compiled_length);
-        }
-
+        // Compile just this line.
         compile_buffer(line + 4, line_number);
 
         line = next_line;
     }
+
     complete_compile_and_execute();
 }
 

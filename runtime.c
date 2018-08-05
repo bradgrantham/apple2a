@@ -240,6 +240,14 @@ void syntax_error_in_line(uint16_t line_number) {
 }
 
 /**
+ * Display an error for a GOTO that went to a line that doesn't exist.
+ */
+void undefined_statement_error(uint16_t line_number) {
+    print("\n?UNDEF'D STATEMENT ERROR IN ");
+    print_int(line_number);
+}
+
+/**
  * Switch to graphics mode.
  */
 void gr_statement(void) {
