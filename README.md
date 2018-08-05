@@ -9,7 +9,7 @@ line numbers, 16-bit integer variables, `HOME`, `PRINT`, `IF/THEN`,
 `FOR/NEXT`, `GOTO`, low-res graphics (`GR`, `PLOT`, `COLOR=`, `TEXT`),
 `POKE`, and basic arithmetic.
 
-Not supported: Floating point, strings, `AND`, `OR`, `NOT`, negative
+Not supported: Floating point, strings, `NOT`, negative
 integers, high-res graphics, `DATA/READ/RESUME`, `GOSUB/RETURN/POP`,
 `DIM` (arrays), `REM`, keyboard input, and cassette I/O.
 

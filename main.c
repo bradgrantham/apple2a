@@ -450,6 +450,66 @@ static void pop_operator_stack() {
             add_call(tosgeax);
             break;
 
+        case OP_AND:
+            // AppleSoft BASIC does not have short-circuit logical operators.
+
+            // See if second operand is 0.
+            g_c[0] = I_STX_ZPG;
+            g_c[1] = (uint8_t) &tmp1;
+            g_c[2] = I_ORA_ZPG;
+            g_c[3] = (uint8_t) &tmp1;
+            // If so, skip other test. A contains 0.
+            g_c[4] = I_BEQ_REL;
+            g_c[5] = 11; // 3 + 6 + 2
+            g_c += 6;
+            add_call(popax); // 3 instructions
+            // See if first operand is 0.
+            g_c[0] = I_STX_ZPG;
+            g_c[1] = (uint8_t) &tmp1;
+            g_c[2] = I_ORA_ZPG;
+            g_c[3] = (uint8_t) &tmp1;
+            // If so, skip setting A to 1. A contains 0.
+            g_c[4] = I_BEQ_REL;
+            g_c[5] = 2; // The LDA below.
+            g_c += 6;
+            // Set A to 1.
+            g_c[0] = I_LDA_IMM;
+            g_c[1] = 1;
+            g_c[2] = I_LDX_IMM;     // The BEQs above arrive here.
+            g_c[3] = 0;
+            g_c += 4;
+            break;
+
+        case OP_OR:
+            // AppleSoft BASIC does not have short-circuit logical operators.
+
+            // See if second operand is 0.
+            g_c[0] = I_STX_ZPG;
+            g_c[1] = (uint8_t) &tmp1;
+            g_c[2] = I_ORA_ZPG;
+            g_c[3] = (uint8_t) &tmp1;
+            // If not, skip other test.
+            g_c[4] = I_BNE_REL;
+            g_c[5] = 9; // 3 + 6
+            g_c += 6;
+            add_call(popax); // 3 instructions
+            // See if first operand is 0.
+            g_c[0] = I_STX_ZPG;
+            g_c[1] = (uint8_t) &tmp1;
+            g_c[2] = I_ORA_ZPG;
+            g_c[3] = (uint8_t) &tmp1;
+            // If so, skip setting A to 1. A contains 0.
+            g_c[4] = I_BEQ_REL;
+            g_c[5] = 2; // The LDA below.
+            g_c += 6;
+            // Set A to 1.
+            g_c[0] = I_LDA_IMM;     // The BNE arrives here.
+            g_c[1] = 1;
+            g_c[2] = I_LDX_IMM;     // The BEQ arrives here.
+            g_c[3] = 0;
+            g_c += 4;
+            break;
+
         case OP_OPEN_PARENS:
             // No-op.
             break;
@@ -534,6 +594,10 @@ static uint8_t *compile_expression(uint8_t *s) {
                 op = OP_MULT;
             } else if (*s == T_SLASH) {
                 op = OP_DIV;
+            } else if (*s == T_AND) {
+                op = OP_AND;
+            } else if (*s == T_OR) {
+                op = OP_OR;
             } else if (*s == T_EQUAL) {
                 if (s[1] == T_LESS_THAN) {
                     s += 1;
@@ -1270,7 +1334,7 @@ int16_t main(void)
         int16_t a, b, c;
         b = 5;
         c = 6;
-        a = b == c;
+        a = b && c;
     }
     */
 
