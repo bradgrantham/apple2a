@@ -161,7 +161,7 @@ int16_t g_input_buffer_length = 0;
 
 // Compiled binary.
 uint8_t g_compiled[1024];
-int16_t g_compiled_length = 0;
+uint8_t *g_c = g_compiled;
 void (*g_compiled_function)() = (void (*)()) g_compiled;
 
 // Stored program. Each line is:
@@ -292,16 +292,16 @@ static uint8_t *skip_over(uint8_t *a, uint8_t *b) {
 static void add_call(void *function) {
     uint16_t addr = (uint16_t) function;
 
-    g_compiled[g_compiled_length++] = I_JSR;
-    g_compiled[g_compiled_length++] = addr & 0xFF;
-    g_compiled[g_compiled_length++] = addr >> 8;
+    *g_c++ = I_JSR;
+    *g_c++ = addr & 0xFF;
+    *g_c++ = addr >> 8;
 }
 
 /**
  * Add a function return to the compiled buffer.
  */
 static void add_return() {
-    g_compiled[g_compiled_length++] = I_RTS;
+    *g_c++ = I_RTS;
 }
 
 /**
@@ -327,10 +327,10 @@ static uint16_t parse_uint16(uint8_t **s_ptr) {
  * Generate code to put the value into AX.
  */
 static void compile_load_ax(uint16_t value) {
-    g_compiled[g_compiled_length++] = I_LDX_IMM;
-    g_compiled[g_compiled_length++] = value >> 8;
-    g_compiled[g_compiled_length++] = I_LDA_IMM;
-    g_compiled[g_compiled_length++] = value & 0xFF;
+    *g_c++ = I_LDX_IMM;
+    *g_c++ = value >> 8;
+    *g_c++ = I_LDA_IMM;
+    *g_c++ = value & 0xFF;
 }
 
 /**
@@ -512,10 +512,10 @@ static uint8_t *compile_expression(uint8_t *s) {
                 compile_load_ax(0);
             } else {
                 // Load from var.
-                g_compiled[g_compiled_length++] = I_LDA_ZPG;
-                g_compiled[g_compiled_length++] = var;
-                g_compiled[g_compiled_length++] = I_LDX_ZPG;
-                g_compiled[g_compiled_length++] = var + 1;
+                *g_c++ = I_LDA_ZPG;
+                *g_c++ = var;
+                *g_c++ = I_LDX_ZPG;
+                *g_c++ = var + 1;
             }
             have_value_in_ax = 1;
         } else {
@@ -750,7 +750,7 @@ static uint8_t add_line_info(uint16_t line_number, uint8_t *code) {
  * Call to configure the compilation step.
  */
 static void set_up_compile(void) {
-    g_compiled_length = 0;
+    g_c = g_compiled;
     g_line_info_count = 0;
     g_forward_goto_count = 0;
 }
@@ -788,10 +788,10 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                     // Parse value.
                     s = compile_expression(s);
                     // Copy to var.
-                    g_compiled[g_compiled_length++] = I_STA_ZPG;
-                    g_compiled[g_compiled_length++] = var;
-                    g_compiled[g_compiled_length++] = I_STX_ZPG;
-                    g_compiled[g_compiled_length++] = var + 1;
+                    *g_c++ = I_STA_ZPG;
+                    *g_c++ = var;
+                    *g_c++ = I_STX_ZPG;
+                    *g_c++ = var + 1;
                 }
             }
         } else if (*s == T_HOME) {
@@ -815,20 +815,20 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             // Parse address.
             s = compile_expression(s);
             // Copy from AX to ptr1.
-            g_compiled[g_compiled_length++] = I_STA_ZPG;
-            g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
-            g_compiled[g_compiled_length++] = I_STX_ZPG;
-            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 + 1;
+            *g_c++ = I_STA_ZPG;
+            *g_c++ = (uint8_t) &ptr1;
+            *g_c++ = I_STX_ZPG;
+            *g_c++ = (uint8_t) &ptr1 + 1;
             if (*s != ',') {
                 error = 1;
             } else {
                 s++;
                 // Parse value. LSB is in A.
                 s = compile_expression(s);
-                g_compiled[g_compiled_length++] = I_LDY_IMM;        // Zero out Y.
-                g_compiled[g_compiled_length++] = 0;
-                g_compiled[g_compiled_length++] = I_STA_IND_Y;      // Store at *ptr1.
-                g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
+                *g_c++ = I_LDY_IMM;        // Zero out Y.
+                *g_c++ = 0;
+                *g_c++ = I_STA_IND_Y;      // Store at *ptr1.
+                *g_c++ = (uint8_t) &ptr1;
             }
         } else if (*s == T_GOTO) {
             s += 1;
@@ -843,34 +843,36 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                     // Line not found. Must be a forward GOTO. Record it
                     // and keep going.
                     uint8_t success = add_forward_goto(line_number, target_line_number,
-                            &g_compiled[g_compiled_length]);
+                            g_c);
                     if (!success) {
                         // TODO handle error.
                     }
                 }
 
-                g_compiled[g_compiled_length++] = I_JMP_ABS;
-                g_compiled[g_compiled_length++] = addr & 0xFF;
-                g_compiled[g_compiled_length++] = addr >> 8;
+                *g_c++ = I_JMP_ABS;
+                *g_c++ = addr & 0xFF;
+                *g_c++ = addr >> 8;
             }
         } else if (*s == T_IF) {
-            uint16_t saved_compiled_length = g_compiled_length;
+            // Save where we are in case we need to roll back.
+            uint8_t *saved_c = g_c;
+
             s += 1;
             // Parse conditional expression.
             s = compile_expression(s);
             // Check if AX is zero. Or the two bytes together, through the zero page.
-            g_compiled[g_compiled_length++] = I_STX_ZPG;
-            g_compiled[g_compiled_length++] = (uint8_t) &tmp1;
-            g_compiled[g_compiled_length++] = I_ORA_ZPG;
-            g_compiled[g_compiled_length++] = (uint8_t) &tmp1;
+            *g_c++ = I_STX_ZPG;
+            *g_c++ = (uint8_t) &tmp1;
+            *g_c++ = I_ORA_ZPG;
+            *g_c++ = (uint8_t) &tmp1;
             // If so, skip to end of this line.
-            g_compiled[g_compiled_length++] = I_BNE_REL;
-            g_compiled[g_compiled_length++] = 3; // Skip over absolute jump.
-            g_compiled[g_compiled_length++] = I_JMP_ABS;
+            *g_c++ = I_BNE_REL;
+            *g_c++ = 3; // Skip over absolute jump.
+            *g_c++ = I_JMP_ABS;
             // TODO Check for overflow of end_of_line_address:
-            end_of_line_address[end_of_line_count++] = (uint8_t **) &g_compiled[g_compiled_length];
-            g_compiled[g_compiled_length++] = 0; // Address of next line.
-            g_compiled[g_compiled_length++] = 0; // Address of next line.
+            end_of_line_address[end_of_line_count++] = (uint8_t **) g_c;
+            *g_c++ = 0; // Address of next line.
+            *g_c++ = 0; // Address of next line.
 
             if (*s == T_THEN) {
                 // Skip THEN and continue
@@ -881,7 +883,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                 continue_statement = 1;
             } else {
                 // Must be THEN or GOTO. Erase what we've done.
-                g_compiled_length = saved_compiled_length;
+                g_c = saved_c;
                 error = 1;
             }
         } else if (*s == T_FOR) {
@@ -913,10 +915,10 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                         s = compile_expression(s);
 
                         // Copy to var.
-                        g_compiled[g_compiled_length++] = I_STA_ZPG;
-                        g_compiled[g_compiled_length++] = var;
-                        g_compiled[g_compiled_length++] = I_STX_ZPG;
-                        g_compiled[g_compiled_length++] = var + 1;
+                        *g_c++ = I_STA_ZPG;
+                        *g_c++ = var;
+                        *g_c++ = I_STX_ZPG;
+                        *g_c++ = var + 1;
 
                         if (*s == T_TO) {
                             s += 1;
@@ -942,11 +944,11 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                             // Don't use compile_load_ax() here because a change
                             // there would mess up how we fill it in below. Inline
                             // it here so we have control over that.
-                            loop_top_addr_addr = &g_compiled[g_compiled_length];
-                            g_compiled[g_compiled_length++] = I_LDX_IMM;
-                            g_compiled_length++;
-                            g_compiled[g_compiled_length++] = I_LDA_IMM;
-                            g_compiled_length++;
+                            loop_top_addr_addr = g_c;
+                            *g_c++ = I_LDX_IMM;
+                            g_c++;
+                            *g_c++ = I_LDA_IMM;
+                            g_c++;
 
                             add_call(for_statement);
                             error = 0;
@@ -956,7 +958,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             }
 
             if (loop_top_addr_addr != 0) {
-                uint16_t loop_top_addr = (uint16_t) &g_compiled[g_compiled_length];
+                uint16_t loop_top_addr = (uint16_t) g_c;
                 loop_top_addr_addr[1] = loop_top_addr >> 8;     // X
                 loop_top_addr_addr[3] = loop_top_addr & 0xFF;   // A
             }
@@ -989,20 +991,20 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             // to if we're looping, or 0 if we're not.
 
             // Copy from AX to ptr1. We must save it because checking it destroys it.
-            g_compiled[g_compiled_length++] = I_STA_ZPG;
-            g_compiled[g_compiled_length++] = (uint8_t) &ptr1;
-            g_compiled[g_compiled_length++] = I_STX_ZPG;
-            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 + 1;
+            *g_c++ = I_STA_ZPG;
+            *g_c++ = (uint8_t) &ptr1;
+            *g_c++ = I_STX_ZPG;
+            *g_c++ = (uint8_t) &ptr1 + 1;
             // Check if AX is zero. Destroys AX.
-            g_compiled[g_compiled_length++] = I_ORA_ZPG;
-            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 + 1;  // OR X into A.
+            *g_c++ = I_ORA_ZPG;
+            *g_c++ = (uint8_t) &ptr1 + 1;  // OR X into A.
             // If zero, skip over jump.
-            g_compiled[g_compiled_length++] = I_BEQ_REL;
-            g_compiled[g_compiled_length++] = 3;                    // Skip over indirect jump.
+            *g_c++ = I_BEQ_REL;
+            *g_c++ = 3;                    // Skip over indirect jump.
             // Jump to top of loop, indirectly through ptr1, which has the address.
-            g_compiled[g_compiled_length++] = I_JMP_IND;
-            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 & 0x0F;
-            g_compiled[g_compiled_length++] = (uint8_t) &ptr1 >> 8;
+            *g_c++ = I_JMP_IND;
+            *g_c++ = (uint8_t) &ptr1 & 0x0F;
+            *g_c++ = (uint8_t) &ptr1 >> 8;
         } else if (*s == T_GR) {
             s += 1;
             add_call(gr_statement);
@@ -1062,7 +1064,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
 
     // Fill in the places where we needed the address of the end of the line.
     while (end_of_line_count > 0) {
-        *end_of_line_address[--end_of_line_count] = &g_compiled[g_compiled_length];
+        *end_of_line_address[--end_of_line_count] = g_c;
     }
 }
 
@@ -1071,6 +1073,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
  */
 static void complete_compile_and_execute(void) {
     int i;
+    uint16_t compiled_length;
 
     // Return from function.
     add_return();
@@ -1083,7 +1086,7 @@ static void complete_compile_and_execute(void) {
     // jumps to error messages.
     for (i = 0; i < g_forward_goto_count; i++) {
         ForwardGoto *f = &g_forward_goto[i];
-        uint16_t addr = (uint16_t) &g_compiled[g_compiled_length];
+        uint16_t addr = (uint16_t) g_c;
 
         // Jump to end of buffer.
         f->jmp_address[1] = addr & 0xFF;
@@ -1098,22 +1101,23 @@ static void complete_compile_and_execute(void) {
     }
 
     // Dump compiled buffer to the terminal.
+    compiled_length = g_c - g_compiled;
     if (1) {
         int i;
         uint8_t *debug_port = (uint8_t *) 0xBFFE;
 
         // Size of program (including initial address).
-        debug_port[0] = 2 + g_compiled_length;
+        debug_port[0] = 2 + compiled_length;
         // Address of program start, little endian.
         debug_port[1] = ((uint16_t) &g_compiled[0]) & 0xFF;
         debug_port[1] = ((uint16_t) &g_compiled[0]) >> 8;
         // Program bytes.
-        for (i = 0; i < g_compiled_length; i++) {
+        for (i = 0; i < compiled_length; i++) {
             debug_port[1] = g_compiled[i];
         }
     }
 
-    if (g_compiled_length > sizeof(g_compiled)) {
+    if (compiled_length > sizeof(g_compiled)) {
         // TODO: Check while adding bytes, not at the end.
         print("\n?Binary length exceeded");
     } else {
@@ -1147,7 +1151,7 @@ static void compile_stored_program(void) {
 
     while ((next_line = get_next_line(line)) != 0) {
         uint16_t line_number = get_line_number(line);
-        uint8_t success = add_line_info(line_number, g_compiled + g_compiled_length);
+        uint8_t success = add_line_info(line_number, g_c);
 
         // Compile just this line.
         compile_buffer(line + 4, line_number);

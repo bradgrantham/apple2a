@@ -11,6 +11,8 @@ CPU     =       6502
 ROM	= 	apple2a.rom
 LIB	=	apple2rom.lib
 
+CC65_FLAGS = -t none --cpu $(CPU)
+
 $(ROM): a.out
 	(dd count=5 bs=4096 if=/dev/zero 2> /dev/null; cat a.out) > $(ROM)
 
@@ -25,17 +27,17 @@ clean:
 	rm -f *.o *.lst a.out platform.s runtime.s main.s $(LIB) tmp.lib
 
 main.s: main.c exporter.h platform.h runtime.h
-	$(CC65)/cc65 -t none -O --cpu $(CPU) $<
+	$(CC65)/cc65 $(CC65_FLAGS) -O $<
 
 runtime.s: runtime.c runtime.h
-	$(CC65)/cc65 -t none -O --cpu $(CPU) $<
+	$(CC65)/cc65 $(CC65_FLAGS) -O $<
 
 %.o: %.s
 	$(CC65)/ca65 -l $(<:.s=.lst) --cpu $(CPU) $<
 
 # platform.c contains inline assembly and code that must not be optimized
 platform.s: platform.c
-	$(CC65)/cc65 -t none --cpu $(CPU) $<
+	$(CC65)/cc65 $(CC65_FLAGS) $<
 
 platform.o: platform.s
 interrupt.o: interrupt.s
