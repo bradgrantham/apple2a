@@ -223,11 +223,12 @@ void print(uint8_t *s) {
 /**
  * Print an unsigned integer.
  */
-void print_int(uint16_t i) {
+void print_uint(uint16_t i) {
     // Is this the best way to do this? I've seen it done backwards, where
     // digits are added to a buffer least significant digit first, then reversed,
     // but this seems faster.
     char printed = 0;
+
     if (i >= 10000) {
         int16_t r = i / 10000;
         print_char('0' + r);
@@ -255,6 +256,18 @@ void print_int(uint16_t i) {
 }
 
 /**
+ * Print a signed integer.
+ */
+void print_int(int16_t i) {
+    if ((i & 0x8000) != 0) {
+        print_char('-');
+        i = -i;
+    }
+
+    print_uint((uint16_t) i);
+}
+
+/**
  * Print an error message, optionally with a line number if it's
  * not INVALID_LINE_NUMBER.
  */
@@ -264,7 +277,7 @@ static void generic_error_message(uint8_t *message, uint16_t line_number) {
 
     if (line_number != INVALID_LINE_NUMBER) {
         print(" IN ");
-        print_int(line_number);
+        print_uint(line_number);
     }
 }
 

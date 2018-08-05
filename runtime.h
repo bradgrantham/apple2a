@@ -34,7 +34,8 @@ void home(void);
 
 void print(uint8_t *s);
 void print_char(uint8_t c);
-void print_int(uint16_t i);
+void print_uint(uint16_t i);
+void print_int(int16_t i);
 void print_newline(void);
 
 void for_statement(uint16_t line_number, uint16_t var_address, int16_t end_value, int16_t step,

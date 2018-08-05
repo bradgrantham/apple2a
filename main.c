@@ -262,7 +262,7 @@ static void list_statement() {
     print_newline();
 
     while ((next_line = get_next_line(line)) != 0) {
-        print_int(get_line_number(line));
+        print_uint(get_line_number(line));
         print_char(' ');
         print_detokenized(line + 4);
 
