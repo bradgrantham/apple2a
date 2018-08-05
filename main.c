@@ -625,7 +625,8 @@ static uint16_t tokenize(uint8_t *s) {
 
             // Try every token.
             for (i = 0; i < TOKEN_COUNT; i++) {
-                skipped = skip_over(s, TOKEN[i]);
+                // Quick optimization, peek at the first letter.
+                skipped = s[0] == TOKEN[i][0] ? skip_over(s, TOKEN[i]) : 0;
                 if (skipped != 0) {
                     // Record token.
                     *t++ = 0x80 + i;
