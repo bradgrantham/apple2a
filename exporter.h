@@ -15,6 +15,7 @@ extern void tosltax();
 extern void tosgtax();
 extern void tosleax();
 extern void tosgeax();
+extern void bnegax();
 
 // Two bytes each.
 extern unsigned int ptr1;

@@ -55,6 +55,7 @@ uint8_t title_length = 9;
 #define T_TO 0x98
 #define T_STEP 0x99
 #define T_NEXT 0x9A
+#define T_NOT 0x9B
 
 // Operators. These encode both the operator (high nybble) and the precedence
 // (low nybble). Lower precedence has a lower low nybble value. For example,
@@ -153,6 +154,7 @@ static uint8_t *TOKEN[] = {
     "TO",
     "STEP",
     "NEXT",
+    "NOT",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -510,6 +512,10 @@ static void pop_operator_stack() {
             g_c += 4;
             break;
 
+        case OP_NOT:
+            add_call(bnegax);
+            break;
+
         case OP_OPEN_PARENS:
             // No-op.
             break;
@@ -528,13 +534,16 @@ static void pop_operator_stack() {
  * https://en.wikipedia.org/wiki/Shunting-yard_algorithm
  */
 static void push_operator_stack(uint8_t op) {
-    // All our operators are left-associative, so no special check for the case
-    // of equal precedence.
-    while (g_op_stack_size > 0 &&
-            g_op_stack[g_op_stack_size - 1] != OP_OPEN_PARENS &&
-            OP_PRECEDENCE(g_op_stack[g_op_stack_size - 1]) >= OP_PRECEDENCE(op)) {
+    // Don't pop anything off if op is unary.
+    if (op != OP_NOT) {
+        // All our operators are left-associative, so no special check for the case
+        // of equal precedence.
+        while (g_op_stack_size > 0 &&
+                g_op_stack[g_op_stack_size - 1] != OP_OPEN_PARENS &&
+                OP_PRECEDENCE(g_op_stack[g_op_stack_size - 1]) >= OP_PRECEDENCE(op)) {
 
-        pop_operator_stack();
+            pop_operator_stack();
+        }
     }
 
     // TODO Check for g_op_stack overflow.
@@ -598,6 +607,8 @@ static uint8_t *compile_expression(uint8_t *s) {
                 op = OP_AND;
             } else if (*s == T_OR) {
                 op = OP_OR;
+            } else if (*s == T_NOT) {
+                op = OP_NOT;
             } else if (*s == T_EQUAL) {
                 if (s[1] == T_LESS_THAN) {
                     s += 1;

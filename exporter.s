@@ -29,6 +29,8 @@
 .export     _tosleax := tosleax
 .import     tosgeax
 .export     _tosgeax := tosgeax
+.import     bnegax
+.export     _bnegax := bnegax
 
 .importzp   ptr1
 .exportzp   _ptr1 = ptr1
