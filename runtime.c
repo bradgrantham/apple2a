@@ -5,6 +5,9 @@
 // Max number of nested FOR loops. This value matches AppleSoft BASIC.
 #define MAX_FOR 10
 
+// Max words for arrays.
+#define MAX_ARRAY_WORDS 2048
+
 #define CURSOR_GLYPH 127
 #define SCREEN_HEIGHT 24
 #define SCREEN_WIDTH 40
@@ -38,28 +41,31 @@ typedef struct {
 } ForInfo;
 
 // Location of cursor in logical screen space.
-uint16_t g_cursor_x = 0;
-uint16_t g_cursor_y = 0;
+uint16_t g_cursor_x;
+uint16_t g_cursor_y;
 // Whether the cursor is being displayed.
-uint16_t g_showing_cursor = 0;
+uint16_t g_showing_cursor;
 // Character at the cursor location.
-uint8_t g_cursor_ch = 0;
+uint8_t g_cursor_ch;
 
 // Whether in low-res graphics mode.
-uint8_t g_gr_mode = 0;
+uint8_t g_gr_mode;
 
 // 4-bit low-res color.
-uint8_t g_gr_color_high = 0; // High nybble.
-uint8_t g_gr_color_low = 0;  // Low nybble.
+uint8_t g_gr_color_high; // High nybble.
+uint8_t g_gr_color_low;  // Low nybble.
 
-// List of variable names, two bytes each, in the same order they are
-// in the zero page (starting at FIRST_VARIABLE). Two nuls means an unused
-// slot. One-letter variable names have a nul for the second character.
-uint8_t g_variable_names[MAX_VARIABLES*2];
+// List of variable, in the same order they are in the zero page (starting at
+// FIRST_VARIABLE).
+VarInfo g_variables[MAX_VARIABLES];
 
 // Stack of FOR loops.
 ForInfo g_for_info[MAX_FOR];
 uint8_t g_for_count;
+
+// Space for arrays.
+uint16_t g_arrays[MAX_ARRAY_WORDS];
+uint16_t g_arrays_size;
 
 /**
  * Clear the FOR stack.
@@ -75,6 +81,7 @@ void clear_for_stack(void) {
 void initialize_runtime(void) {
     memset((void *) FIRST_VARIABLE, 0, MAX_VARIABLES*2);
     clear_for_stack();
+    g_arrays_size = 0;
 }
 
 /**
@@ -274,6 +281,7 @@ void print_int(int16_t i) {
 static void generic_error_message(uint8_t *message, uint16_t line_number) {
     print("\n?");
     print(message);
+    print(" ERROR");
 
     if (line_number != INVALID_LINE_NUMBER) {
         print(" IN ");
@@ -285,14 +293,14 @@ static void generic_error_message(uint8_t *message, uint16_t line_number) {
  * Display a syntax error message.
  */
 void syntax_error(uint16_t line_number) {
-    generic_error_message("SYNTAX ERROR", line_number);
+    generic_error_message("SYNTAX", line_number);
 }
 
 /**
  * Display an error for a GOTO that went to a line that doesn't exist.
  */
 void undefined_statement_error(uint16_t line_number) {
-    generic_error_message("UNDEF'D STATEMENT ERROR", line_number);
+    generic_error_message("UNDEF'D STATEMENT", line_number);
 }
 
 /**
@@ -300,14 +308,21 @@ void undefined_statement_error(uint16_t line_number) {
  * stacks have been overflowed.
  */
 void out_of_memory_error(uint16_t line_number) {
-    generic_error_message("OUT OF MEMORY ERROR", line_number);
+    generic_error_message("OUT OF MEMORY", line_number);
 }
 
 /**
  * Display an error for when the user does a NEXT without a matching FOR.
  */
 void next_without_for_error(uint16_t line_number) {
-    generic_error_message("NEXT WITHOUT FOR ERROR", line_number);
+    generic_error_message("NEXT WITHOUT FOR", line_number);
+}
+
+/**
+ * Display an error for when the user does a DIM on a variable a second time.
+ */
+void redimd_array_error(uint16_t line_number) {
+    generic_error_message("REDIM'D ARRAY", line_number);
 }
 
 /**
@@ -479,4 +494,28 @@ uint16_t next_statement(uint16_t line_number, uint16_t var_address) {
     }
 
     return jump_addr;
+}
+
+/**
+ * Allocate an array. Size is in words, and var_addr points to
+ * the variable that will store the array location.
+ */
+void allocate_array(uint16_t size, uint16_t var_addr) {
+    // Check for overflow.
+    if (g_arrays_size + size > MAX_ARRAY_WORDS) {
+        print("Too many arrays.\n");
+    } else {
+        // Allocate next chunk.
+        *(uint16_t *) var_addr = (uint16_t) (g_arrays + g_arrays_size);
+
+        // TODO temporary, fill with stuff.
+        {
+            int i;
+            for (i = 0; i < size; i++) {
+                g_arrays[g_arrays_size + i] = i;
+            }
+        }
+
+        g_arrays_size += size;
+    }
 }

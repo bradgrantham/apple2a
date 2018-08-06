@@ -9,6 +9,8 @@
 .export     _pushax := pushax
 .import     popax
 .export     _popax := popax
+.import     incsp2
+.export     _incsp2 := incsp2
 .import     tosaddax
 .export     _tosaddax := tosaddax
 .import     tossubax
@@ -33,6 +35,15 @@
 .export     _bnegax := bnegax
 .import     negax
 .export     _negax := negax
+.import     aslax1
+.export     _aslax1 := aslax1
+.import     ldaxi
+.export     _ldaxi := ldaxi
+.import     staxspidx
+.export     _staxspidx := staxspidx
+
+.importzp   sp
+.exportzp   _sp = sp
 
 .importzp   ptr1
 .exportzp   _ptr1 = ptr1

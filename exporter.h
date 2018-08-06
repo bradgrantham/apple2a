@@ -5,6 +5,7 @@
 
 extern void pushax();
 extern void popax();
+extern void incsp2();
 extern void tosaddax();
 extern void tossubax();
 extern void tosmulax();
@@ -17,8 +18,13 @@ extern void tosleax();
 extern void tosgeax();
 extern void bnegax();
 extern void negax();
+extern void aslax1();
+extern void ldaxi();
+extern void staxspidx();
 
 // Two bytes each.
+extern unsigned int sp;
+#pragma zpsym ("sp");
 extern unsigned int ptr1;
 #pragma zpsym ("ptr1");
 

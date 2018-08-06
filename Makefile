@@ -11,7 +11,7 @@ CPU     =       6502
 ROM	= 	apple2a.rom
 LIB	=	apple2rom.lib
 
-CC65_FLAGS = -t none --cpu $(CPU)
+CC65_FLAGS = -t none --cpu $(CPU) --register-vars
 
 $(ROM): a.out
 	(dd count=5 bs=4096 if=/dev/zero 2> /dev/null; cat a.out) > $(ROM)

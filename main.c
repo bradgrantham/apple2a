@@ -12,11 +12,16 @@ uint8_t title_length = 9;
 #define I_CLC 0x18
 #define I_JSR 0x20
 #define I_SEC 0x38
+#define I_PHA 0x48
 #define I_JMP_ABS 0x4C
 #define I_RTS 0x60
+#define I_ADC_ZPG 0x65
+#define I_PLA 0x68
 #define I_JMP_IND 0x6C
+#define I_ADC_ZPG_Y 0x71
 #define I_STA_ZPG 0x85
 #define I_STX_ZPG 0x86
+#define I_TXA 0x8A
 #define I_STA_IND_Y 0x91
 #define I_LDY_IMM 0xA0
 #define I_LDX_IMM 0xA2
@@ -24,6 +29,7 @@ uint8_t title_length = 9;
 #define I_LDX_ZPG 0xA6
 #define I_LDA_IMM 0xA9
 #define I_TAX 0xAA
+#define I_INY 0xC8
 #define I_BNE_REL 0xD0
 #define I_BEQ_REL 0xF0
 
@@ -56,6 +62,7 @@ uint8_t title_length = 9;
 #define T_STEP 0x99
 #define T_NEXT 0x9A
 #define T_NOT 0x9B
+#define T_DIM 0x9C
 
 // Operators. These encode both the operator (high nybble) and the precedence
 // (low nybble). Lower precedence has a lower low nybble value. For example,
@@ -80,13 +87,11 @@ uint8_t title_length = 9;
 #define OP_DIV 0xCB
 #define OP_NEG 0xDD
 #define OP_EXP 0xEE
+#define OP_ARRAY_DEREF 0xFB // Ignore precedence.
 #define OP_NO_OP 0xFC // Never on the stack.
 #define OP_CLOSE_PARENS 0xFD // Never on the stack.
 #define OP_OPEN_PARENS 0xFE // Ignore precedence.
 #define OP_INVALID 0xFF
-
-// Variable for "No more space for variables".
-#define OUT_OF_VARIABLE_SPACE 0xFF
 
 // Maximum number of lines in stored program.
 #define MAX_LINES 128
@@ -156,11 +161,12 @@ static uint8_t *TOKEN[] = {
     "STEP",
     "NEXT",
     "NOT",
+    "DIM",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
 uint8_t g_input_buffer[80];
-int16_t g_input_buffer_length = 0;
+int16_t g_input_buffer_length;
 
 // Compiled binary.
 uint8_t g_compiled[1024];
@@ -181,12 +187,12 @@ uint8_t g_line_info_count;
 // Operator stack, of the expression-evaluation routines. These are from the
 // OP_ constants.
 uint8_t g_op_stack[MAX_OP_STACK];
-uint8_t g_op_stack_size = 0;
+uint8_t g_op_stack_size;
 
 // List of all forward GOTOs. These are packed at the beginning, so the
 // first invalid (jmp_address == 0) entry marks the end.
 ForwardGoto g_forward_goto[MAX_FORWARD_GOTO];
-uint8_t g_forward_goto_count = 0;
+uint8_t g_forward_goto_count;
 
 /**
  * Print the tokenized string, with tokens displayed as their full text.
@@ -339,54 +345,84 @@ static void compile_load_ax(uint16_t value) {
 }
 
 /**
- * Find a variable by name. Only the first two letters are considered.
- * Advances the pointer past the variable name (including letters after
- * the first two). Returns the memory address of the variable. If we
- * ran out of space for variables, returns OUT_OF_VARIABLE_SPACE
- * and does not modify the buffer pointer.
+ * Generate code to store AX to a zero-page word.
  */
-static uint8_t find_variable(uint8_t **buffer) {
+static void compile_store_zero_page(uint8_t addr) {
+    g_c[0] = I_STA_ZPG;
+    g_c[1] = addr;
+    g_c[2] = I_STX_ZPG;
+    g_c[3] = addr + 1;
+    g_c += 4;
+}
+
+/**
+ * Generate code to load AX from a zero-page word.
+ */
+static void compile_load_zero_page(uint8_t addr) {
+    g_c[0] = I_LDA_ZPG;
+    g_c[1] = addr;
+    g_c[2] = I_LDX_ZPG;
+    g_c[3] = addr + 1;
+    g_c += 4;
+}
+
+/**
+ * Find a variable by name. The buffer pointer must already be on the
+ * first letter of a variable. Only the first two letters are considered.
+ * Advances the pointer past the variable name (including letters after
+ * the first two). Returns the VarInfo structure, or 0 if we can't find
+ * the variable or create it.
+ */
+static VarInfo *find_variable(uint8_t **buffer) {
     uint8_t *s = *buffer;
-    uint8_t *existing_name = g_variable_names;
-    uint8_t name[2];
-    int16_t var;
+    VarInfo *var = g_variables;
+    uint16_t name;
+    int16_t i;
+    uint8_t data_type;
 
     // Pull out the variable name.
-    name[0] = *s++;
+    name = *s++;
     if (IS_SUBSEQUENT_VARIABLE_LETTER(*s)) {
-        name[1] = *s++;
-    } else {
-        name[1] = 0;
+        name |= *s++ << 8;
     }
     // Skip rest of name.
     while (IS_SUBSEQUENT_VARIABLE_LETTER(*s)) {
         s++;
     }
 
-    for (var = 0; var < MAX_VARIABLES; var++) {
-        if (existing_name[0] == 0 && existing_name[1] == 0) {
+    // Determine data type based on next letter. Don't skip over the open
+    // parenthesis.
+    data_type = *s == '(' ? DT_ARRAY : DT_INT;
+
+    // Look for our variable or the first unused slot.
+    for (i = 0; i < MAX_VARIABLES; i++, var++) {
+        if (var->name == 0) {
             // First free entry. Allocate it.
-            existing_name[0] = name[0];
-            existing_name[1] = name[1];
+            var->name = name;
+            var->data_type = data_type;
             break;
-        } else if (existing_name[0] == name[0] && existing_name[1] == name[1]) {
+        } else if (var->name == name && var->data_type == data_type) {
             // Found it.
             break;
         }
-        existing_name += 2;
     }
 
-    if (var == MAX_VARIABLES) {
-        var = OUT_OF_VARIABLE_SPACE;
+    if (i == MAX_VARIABLES) {
+        // Not found and can't create it.
+        var = 0;
     } else {
-        // Convert index to address.
-        var = FIRST_VARIABLE + 2*var;
-
         // Advance pointer.
         *buffer = s;
     }
 
-    return (uint8_t) var;
+    return var;
+}
+
+/**
+ * Get the zero page address of a VarInfo pointer's variable.
+ */
+static uint8_t get_var_address(VarInfo *var) {
+    return FIRST_VARIABLE + 2*(var - g_variables);
 }
 
 /**
@@ -411,6 +447,7 @@ static uint8_t *find_line_address(uint16_t line_number) {
  */
 static void pop_operator_stack() {
     uint8_t op = g_op_stack[--g_op_stack_size];
+    register uint8_t *c;
 
     switch (op) {
         case OP_ADD:
@@ -457,60 +494,62 @@ static void pop_operator_stack() {
             // AppleSoft BASIC does not have short-circuit logical operators.
 
             // See if second operand is 0.
-            g_c[0] = I_STX_ZPG;
-            g_c[1] = (uint8_t) &tmp1;
-            g_c[2] = I_ORA_ZPG;
-            g_c[3] = (uint8_t) &tmp1;
+            c = g_c;
+            c[0] = I_STX_ZPG;
+            c[1] = (uint8_t) &tmp1;
+            c[2] = I_ORA_ZPG;
+            c[3] = (uint8_t) &tmp1;
             // If so, skip other test. A contains 0.
-            g_c[4] = I_BEQ_REL;
-            g_c[5] = 11; // 3 + 6 + 2
-            g_c += 6;
+            c[4] = I_BEQ_REL;
+            c[5] = 11; // 3 + 6 + 2
+            g_c = c + 6;
             add_call(popax); // 3 instructions
+            c = g_c;
             // See if first operand is 0.
-            g_c[0] = I_STX_ZPG;
-            g_c[1] = (uint8_t) &tmp1;
-            g_c[2] = I_ORA_ZPG;
-            g_c[3] = (uint8_t) &tmp1;
+            c[0] = I_STX_ZPG;
+            c[1] = (uint8_t) &tmp1;
+            c[2] = I_ORA_ZPG;
+            c[3] = (uint8_t) &tmp1;
             // If so, skip setting A to 1. A contains 0.
-            g_c[4] = I_BEQ_REL;
-            g_c[5] = 2; // The LDA below.
-            g_c += 6;
+            c[4] = I_BEQ_REL;
+            c[5] = 2; // The LDA below.
             // Set A to 1.
-            g_c[0] = I_LDA_IMM;
-            g_c[1] = 1;
-            g_c[2] = I_LDX_IMM;     // The BEQs above arrive here.
-            g_c[3] = 0;
-            g_c += 4;
+            c[6] = I_LDA_IMM;
+            c[7] = 1;
+            c[8] = I_LDX_IMM;     // The BEQs above arrive here.
+            c[9] = 0;
+            g_c = c + 10;
             break;
 
         case OP_OR:
             // AppleSoft BASIC does not have short-circuit logical operators.
 
             // See if second operand is 0.
-            g_c[0] = I_STX_ZPG;
-            g_c[1] = (uint8_t) &tmp1;
-            g_c[2] = I_ORA_ZPG;
-            g_c[3] = (uint8_t) &tmp1;
+            c = g_c;
+            c[0] = I_STX_ZPG;
+            c[1] = (uint8_t) &tmp1;
+            c[2] = I_ORA_ZPG;
+            c[3] = (uint8_t) &tmp1;
             // If not, skip other test.
-            g_c[4] = I_BNE_REL;
-            g_c[5] = 9; // 3 + 6
-            g_c += 6;
+            c[4] = I_BNE_REL;
+            c[5] = 9; // 3 + 6
+            g_c = c + 6;
             add_call(popax); // 3 instructions
+            c = g_c;
             // See if first operand is 0.
-            g_c[0] = I_STX_ZPG;
-            g_c[1] = (uint8_t) &tmp1;
-            g_c[2] = I_ORA_ZPG;
-            g_c[3] = (uint8_t) &tmp1;
+            c[0] = I_STX_ZPG;
+            c[1] = (uint8_t) &tmp1;
+            c[2] = I_ORA_ZPG;
+            c[3] = (uint8_t) &tmp1;
             // If so, skip setting A to 1. A contains 0.
-            g_c[4] = I_BEQ_REL;
-            g_c[5] = 2; // The LDA below.
-            g_c += 6;
+            c[4] = I_BEQ_REL;
+            c[5] = 2; // The LDA below.
             // Set A to 1.
-            g_c[0] = I_LDA_IMM;     // The BNE arrives here.
-            g_c[1] = 1;
-            g_c[2] = I_LDX_IMM;     // The BEQ arrives here.
-            g_c[3] = 0;
-            g_c += 4;
+            c[6] = I_LDA_IMM;     // The BNE arrives here.
+            c[7] = 1;
+            c[8] = I_LDX_IMM;     // The BEQ arrives here.
+            c[9] = 0;
+            g_c = c + 10;
             break;
 
         case OP_NOT:
@@ -519,6 +558,37 @@ static void pop_operator_stack() {
 
         case OP_NEG:
             add_call(negax);
+            break;
+
+        case OP_ARRAY_DEREF:
+            // Index is in AX and array address is at the top of the stack.
+
+            // Double the index, since each entry takes two bytes.
+            add_call(aslax1);
+
+            // Add A to low byte of array address.
+            c = g_c;
+            c[0] = I_CLC;
+            c[1] = I_LDY_IMM;     // First entry in stack.
+            c[2] = 0;
+            c[3] = I_ADC_ZPG_Y;
+            c[4] = (uint8_t) &sp;
+            c[5] = I_PHA;
+
+            // Add X to high byte by array address.
+            c[6] = I_TXA;
+            c[7] = I_INY;
+            c[8] = I_ADC_ZPG_Y;
+            c[9] = (uint8_t) &sp;
+            c[10] = I_TAX;
+            c[11] = I_PLA;
+            g_c = c + 12;
+
+            // Load word at AX.
+            add_call(ldaxi);
+
+            // Discard address off stack.
+            add_call(incsp2);
             break;
 
         case OP_OPEN_PARENS:
@@ -537,15 +607,19 @@ static void pop_operator_stack() {
  * first.
  *
  * https://en.wikipedia.org/wiki/Shunting-yard_algorithm
+ * http://wcipeg.com/wiki/Shunting_yard_algorithm
  */
 static void push_operator_stack(uint8_t op) {
+    uint8_t top_op;
+
     // Don't pop anything off if op is unary.
     if (op != OP_NOT && op != OP_NEG) {
         // All our operators are left-associative, so no special check for the case
         // of equal precedence.
         while (g_op_stack_size > 0 &&
-                g_op_stack[g_op_stack_size - 1] != OP_OPEN_PARENS &&
-                OP_PRECEDENCE(g_op_stack[g_op_stack_size - 1]) >= OP_PRECEDENCE(op)) {
+                (top_op = g_op_stack[g_op_stack_size - 1]) != OP_OPEN_PARENS &&
+                top_op != OP_ARRAY_DEREF &&
+                OP_PRECEDENCE(top_op) >= OP_PRECEDENCE(op)) {
 
             pop_operator_stack();
         }
@@ -578,25 +652,36 @@ static uint8_t *compile_expression(uint8_t *s) {
             expect_unary = 0;
         } else if (IS_FIRST_VARIABLE_LETTER(*s)) {
             // Variable reference.
-            uint8_t var = find_variable(&s);
+            VarInfo *var = find_variable(&s);
 
             if (have_value_in_ax) {
                 // Push on the number stack.
                 add_call(pushax);
             }
 
-            if (var == OUT_OF_VARIABLE_SPACE) {
+            if (var == 0) {
                 // TODO: Not sure how to deal with this. For now just
                 // fill in with zero, since assigning to this elsewhere
                 // will cause an error.
                 compile_load_ax(0);
             } else {
+                uint8_t var_addr = get_var_address(var);
+
                 // Load from var.
-                g_c[0] = I_LDA_ZPG;
-                g_c[1] = var;
-                g_c[2] = I_LDX_ZPG;
-                g_c[3] = var + 1;
-                g_c += 4;
+                compile_load_zero_page(var_addr);
+
+                if (var->data_type == DT_ARRAY) {
+                    // Treat the open parenthesis as an array-dereferencing operator.
+                    if (*s == '(') {
+                        s += 1;
+                        push_operator_stack(OP_ARRAY_DEREF);
+                        expect_unary = 1;
+                    } else {
+                        // This is really a programming error, since the
+                        // variable should only be of type DT_ARRAY if it's
+                        // followed by an open parenthesis.
+                    }
+                }
             }
             have_value_in_ax = 1;
 
@@ -658,26 +743,33 @@ static uint8_t *compile_expression(uint8_t *s) {
             } else if (*s == '(') { // Parentheses are not tokenized.
                 op = OP_OPEN_PARENS;
             } else if (*s == ')') { // Parentheses are not tokenized.
+                uint8_t top_op;
+
                 op = OP_CLOSE_PARENS;
 
-                // Pop until open parethesis.
-                while (g_op_stack_size > 0 && g_op_stack[g_op_stack_size - 1] != OP_OPEN_PARENS) {
+                // Pop until open parenthesis or array dereference.
+                while (g_op_stack_size > 0 &&
+                       (top_op = g_op_stack[g_op_stack_size - 1]) != OP_OPEN_PARENS &&
+                       top_op != OP_ARRAY_DEREF) {
+
                     pop_operator_stack();
                 }
                 if (g_op_stack_size == 0) {
-                    // TODO we should generate a syntax error here.
-                    print("Extra close parenthesis\n");
+                    // Maybe this close parenthesis wasn't ours. For example,
+                    // "DIM X(5)". Treat it like end of expression.
+                    op = OP_INVALID;
                 } else {
-                    // Pop open parenthesis.
+                    // Pop open parenthesis or array dereference.
                     pop_operator_stack();
                 }
             }
 
             // Check that we didn't have an inappropriate unary operator.
             if (expect_unary && op != OP_NO_OP && op != OP_NEG && op != OP_NOT &&
-                    op != OP_OPEN_PARENS) {
+                    op != OP_OPEN_PARENS && op != OP_ARRAY_DEREF) {
 
                 // TODO we should generate a syntax error here.
+                print("Unexpected unary\n");
                 break;
             }
 
@@ -872,6 +964,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
     // Keep track of addresses that point to the end of the line.
     uint8_t **end_of_line_address[4];
     uint8_t end_of_line_count = 0;
+    register uint8_t *c;
 
     do {
         int8_t error = 0;
@@ -884,23 +977,63 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             // Empty statement. We skip the colon below.
         } else if (IS_FIRST_VARIABLE_LETTER(*s)) {
             // Must be variable assignment.
-            uint8_t var = find_variable(&s);
-            if (var == OUT_OF_VARIABLE_SPACE) {
+            VarInfo *var = find_variable(&s);
+            if (var == 0) {
                 // TODO: Nicer error specifically for out of variable space.
                 error = 1;
             } else {
-                if (*s != T_EQUAL) {
+                uint8_t var_addr = get_var_address(var);
+
+                if (var->data_type == DT_ARRAY) {
+                    // Array element assignment.
+
+                    // Compile index expression. Skip open parenthesis.
+                    s = compile_expression(s + 1);
+                    if (*s != ')') {
+                        error = 1;
+                    } else {
+                        s += 1;
+
+                        // Index is on the stack. Double the index, since each
+                        // entry takes two bytes.
+                        add_call(aslax1);
+
+                        // Add A to low byte of array address.
+                        c = g_c;
+                        c[0] = I_CLC;
+                        c[1] = I_ADC_ZPG;
+                        c[2] = var_addr;
+                        c[3] = I_PHA;
+
+                        // Add X to high byte by array address.
+                        c[4] = I_TXA;
+                        c[5] = I_ADC_ZPG;
+                        c[6] = var_addr + 1;
+                        c[7] = I_TAX;
+                        c[8] = I_PLA;
+                        g_c = c + 9;
+
+                        // Push element address onto the stack.
+                        add_call(pushax);
+                    }
+                }
+
+                if (*s != T_EQUAL || error) {
                     error = 1;
                 } else {
-                    s += 1;
                     // Parse value.
-                    s = compile_expression(s);
-                    // Copy to var.
-                    g_c[0] = I_STA_ZPG;
-                    g_c[1] = var;
-                    g_c[2] = I_STX_ZPG;
-                    g_c[3] = var + 1;
-                    g_c += 4;
+                    s = compile_expression(s + 1);
+
+                    if (var->data_type == DT_ARRAY) {
+                        // Value is in AX, address is on top of stack. The staxspidx
+                        // function uses Y as an index, so must zero it out.
+                        *g_c++ = I_LDY_IMM;
+                        *g_c++ = 0;
+                        add_call(staxspidx);
+                    } else {
+                        // Copy to var.
+                        compile_store_zero_page(var_addr);
+                    }
                 }
             }
         } else if (*s == T_HOME) {
@@ -924,22 +1057,19 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             // Parse address.
             s = compile_expression(s);
             // Copy from AX to ptr1.
-            g_c[0] = I_STA_ZPG;
-            g_c[1] = (uint8_t) &ptr1;
-            g_c[2] = I_STX_ZPG;
-            g_c[3] = (uint8_t) &ptr1 + 1;
-            g_c += 4;
+            compile_store_zero_page((uint8_t) &ptr1);
             if (*s != ',') {
                 error = 1;
             } else {
                 s++;
                 // Parse value. LSB is in A.
                 s = compile_expression(s);
-                g_c[0] = I_LDY_IMM;        // Zero out Y.
-                g_c[1] = 0;
-                g_c[2] = I_STA_IND_Y;      // Store at *ptr1.
-                g_c[3] = (uint8_t) &ptr1;
-                g_c += 4;
+                c = g_c;
+                c[0] = I_LDY_IMM;        // Zero out Y.
+                c[1] = 0;
+                c[2] = I_STA_IND_Y;      // Store at *ptr1.
+                c[3] = (uint8_t) &ptr1;
+                g_c = c + 4;
             }
         } else if (*s == T_GOTO) {
             s += 1;
@@ -960,10 +1090,11 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                     }
                 }
 
-                g_c[0] = I_JMP_ABS;
-                g_c[1] = addr & 0xFF;
-                g_c[2] = addr >> 8;
-                g_c += 3;
+                c = g_c;
+                c[0] = I_JMP_ABS;
+                c[1] = addr & 0xFF;
+                c[2] = addr >> 8;
+                g_c = c + 3;
             }
         } else if (*s == T_IF) {
             // Save where we are in case we need to roll back.
@@ -973,20 +1104,21 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             // Parse conditional expression.
             s = compile_expression(s);
             // Check if AX is zero. Or the two bytes together, through the zero page.
-            g_c[0] = I_STX_ZPG;
-            g_c[1] = (uint8_t) &tmp1;
-            g_c[2] = I_ORA_ZPG;
-            g_c[3] = (uint8_t) &tmp1;
+            c = g_c;
+            c[0] = I_STX_ZPG;
+            c[1] = (uint8_t) &tmp1;
+            c[2] = I_ORA_ZPG;
+            c[3] = (uint8_t) &tmp1;
             // If so, skip to end of this line.
-            g_c[4] = I_BNE_REL;
-            g_c[5] = 3; // Skip over absolute jump.
-            g_c[6] = I_JMP_ABS;
-            g_c += 7;
+            c[4] = I_BNE_REL;
+            c[5] = 3; // Skip over absolute jump.
+            c[6] = I_JMP_ABS;
+            c += 7;
             // TODO Check for overflow of end_of_line_address:
-            end_of_line_address[end_of_line_count++] = (uint8_t **) g_c;
-            g_c[0] = 0; // Address of next line.
-            g_c[1] = 0; // Address of next line.
-            g_c += 2;
+            end_of_line_address[end_of_line_count++] = (uint8_t **) c;
+            c[0] = 0; // Address of next line.
+            c[1] = 0; // Address of next line.
+            g_c = c + 2;
 
             if (*s == T_THEN) {
                 // Skip THEN and continue
@@ -1009,17 +1141,21 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             error = 1;
 
             if (IS_FIRST_VARIABLE_LETTER(*s)) {
-                uint8_t var;
+                VarInfo *var;
 
                 // For the error message.
                 compile_load_ax(line_number);
                 add_call(pushax);
 
                 var = find_variable(&s);
-                if (var == OUT_OF_VARIABLE_SPACE) {
+                if (var == 0) {
                     // TODO: Nicer error specifically for out of variable space.
+                } else if (var->data_type == DT_ARRAY) {
+                    // Syntax error, can't use array index for FOR loop variable.
                 } else {
-                    compile_load_ax(var);
+                    uint16_t var_addr = get_var_address(var);
+
+                    compile_load_ax(var_addr);
                     add_call(pushax);
 
                     if (*s == T_EQUAL) {
@@ -1029,11 +1165,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                         s = compile_expression(s);
 
                         // Copy to var.
-                        g_c[0] = I_STA_ZPG;
-                        g_c[1] = var;
-                        g_c[2] = I_STX_ZPG;
-                        g_c[3] = var + 1;
-                        g_c += 4;
+                        compile_store_zero_page(var_addr);
 
                         if (*s == T_TO) {
                             s += 1;
@@ -1086,12 +1218,12 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             // See if there's the optional variable. We don't support multiple
             // variables ("NEXT I,J").
             if (IS_FIRST_VARIABLE_LETTER(*s)) {
-                uint8_t var = find_variable(&s);
-                if (var == OUT_OF_VARIABLE_SPACE) {
+                VarInfo *var = find_variable(&s);
+                if (var == 0) {
                     // TODO: Nicer error specifically for out of variable space.
                     error = 1;
                 } else {
-                    compile_load_ax(var);
+                    compile_load_ax(get_var_address(var));
                 }
             } else {
                 // Zero means find the most recent FOR loop.
@@ -1105,21 +1237,91 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             // to if we're looping, or 0 if we're not.
 
             // Copy from AX to ptr1. We must save it because checking it destroys it.
-            g_c[0] = I_STA_ZPG;
-            g_c[1] = (uint8_t) &ptr1;
-            g_c[2] = I_STX_ZPG;
-            g_c[3] = (uint8_t) &ptr1 + 1;
+            c = g_c;
+            c[0] = I_STA_ZPG;
+            c[1] = (uint8_t) &ptr1;
+            c[2] = I_STX_ZPG;
+            c[3] = (uint8_t) &ptr1 + 1;
             // Check if AX is zero. Destroys AX.
-            g_c[4] = I_ORA_ZPG;
-            g_c[5] = (uint8_t) &ptr1 + 1;  // OR X into A.
+            c[4] = I_ORA_ZPG;
+            c[5] = (uint8_t) &ptr1 + 1;  // OR X into A.
             // If zero, skip over jump.
-            g_c[6] = I_BEQ_REL;
-            g_c[7] = 3;                    // Skip over indirect jump.
+            c[6] = I_BEQ_REL;
+            c[7] = 3;                    // Skip over indirect jump.
             // Jump to top of loop, indirectly through ptr1, which has the address.
-            g_c[8] = I_JMP_IND;
-            g_c[9] = (uint8_t) &ptr1 & 0x0F;
-            g_c[10] = (uint8_t) &ptr1 >> 8;
-            g_c += 11;
+            c[8] = I_JMP_IND;
+            c[9] = (uint8_t) &ptr1 & 0x0F;
+            c[10] = (uint8_t) &ptr1 >> 8;
+            g_c = c + 11;
+        } else if (*s == T_DIM) {
+            s += 1;
+
+            while (1) {
+                // Expect variable name.
+                if (!IS_FIRST_VARIABLE_LETTER(*s)) {
+                    error = 1;
+                } else {
+                    VarInfo *var = find_variable(&s);
+
+                    if (var == 0) {
+                        // TODO handle error.
+                        error = 1;
+                    } else {
+                        // Must be an array variable.
+                        if (var->data_type != DT_ARRAY) {
+                            // TODO handle error.
+                            error = 1;
+                        } else {
+                            uint8_t var_addr = get_var_address(var);
+
+                            // Put array address in AX.
+                            compile_load_zero_page(var_addr);
+
+                            // See if we have an address. If yes, then we've been
+                            // dimensioned before.
+                            c = g_c;
+                            c[0] = I_STX_ZPG;
+                            c[1] = (uint8_t) &tmp1;
+                            c[2] = I_ORA_ZPG;
+                            c[3] = (uint8_t) &tmp1;
+                            c[4] = I_BEQ_REL;     // If zero, branch to actual work.
+                            c[5] = 8;             // Load, call, and return.
+                            g_c = c + 6;
+                            compile_load_ax(line_number);
+                            add_call(redimd_array_error);
+                            add_return();
+
+                            // Assume we're followed by an open parenthesis. Parse
+                            // expression for the size of the array.
+                            s = compile_expression(s + 1);
+
+                            if (*s != ')') {
+                                error = 1;
+                            } else {
+                                s += 1;
+
+                                // AX now holds the size of the array.
+                                add_call(pushax);
+
+                                // Push address in zero page where the array address
+                                // should be stored.
+                                compile_load_ax(var_addr);
+
+                                // Call a runtime routine to allocate it.
+                                add_call(allocate_array);
+                            }
+                        }
+                    }
+                }
+
+                if (*s == ',') {
+                    // More variables to dim.
+                    s += 1;
+                } else {
+                    // We're done.
+                    break;
+                }
+            }
         } else if (*s == T_GR) {
             s += 1;
             add_call(gr_statement);
@@ -1131,8 +1333,7 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             if (*s != T_EQUAL) {
                 error = 1;
             } else {
-                s += 1;
-                s = compile_expression(s);
+                s = compile_expression(s + 1);
                 add_call(color_statement);
             }
         } else if (*s == T_PLOT) {
@@ -1246,7 +1447,7 @@ static void complete_compile_and_execute(void) {
  * knowledge of them.
  */
 void clear_variables(void) {
-    memset(g_variable_names, 0, sizeof(g_variable_names));
+    memset(g_variables, 0, sizeof(g_variables));
 }
 
 /**
@@ -1368,6 +1569,13 @@ static void process_input_buffer() {
 int16_t main(void)
 {
     int16_t blink;
+
+    {
+        uint16_t *foo;
+        int x = 5;
+        blink = foo[x];
+    }
+
 
     // Clear stored program.
     new_statement();
