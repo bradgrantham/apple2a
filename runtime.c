@@ -381,13 +381,16 @@ static ForInfo *find_for_info(uint16_t var_address) {
     int i;
     ForInfo *f;
 
-    for (i = 0; i < g_for_count; i++) {
-        f = &g_for_info[i];
-
+    // Work backwards through the stack, since the variable we're looking
+    // for is likely to be the most recent one.
+    f = &g_for_info[g_for_count - 1];
+    for (i = g_for_count - 1; i >= 0; i--) {
         if (f->var_address == var_address) {
             // Found it.
             return f;
         }
+
+        f -= 1;
     }
 
     return 0;
