@@ -80,6 +80,7 @@ uint8_t title_length = 9;
 #define OP_DIV 0xCB
 #define OP_NEG 0xDD
 #define OP_EXP 0xEE
+#define OP_NO_OP 0xFC // Never on the stack.
 #define OP_CLOSE_PARENS 0xFD // Never on the stack.
 #define OP_OPEN_PARENS 0xFE // Ignore precedence.
 #define OP_INVALID 0xFF
@@ -560,7 +561,7 @@ static void push_operator_stack(uint8_t op) {
  */
 static uint8_t *compile_expression(uint8_t *s) {
     char have_value_in_ax = 0;
-    uint8_t expect_unary_minus = 1; // Expect unary minus at start of expression.
+    uint8_t expect_unary = 1; // Expect unary operator at start of expression.
 
     while (1) {
         if (IS_DIGIT(*s)) {
@@ -573,8 +574,8 @@ static uint8_t *compile_expression(uint8_t *s) {
             compile_load_ax(parse_uint16(&s));
             have_value_in_ax = 1;
 
-            // Expect binary minus after operand.
-            expect_unary_minus = 0;
+            // Expect binary operator after operand.
+            expect_unary = 0;
         } else if (IS_FIRST_VARIABLE_LETTER(*s)) {
             // Variable reference.
             uint8_t var = find_variable(&s);
@@ -599,16 +600,16 @@ static uint8_t *compile_expression(uint8_t *s) {
             }
             have_value_in_ax = 1;
 
-            // Expect binary minus after operand.
-            expect_unary_minus = 0;
+            // Expect binary operator after operand.
+            expect_unary = 0;
         } else {
             // Check if it's an operator.
             uint8_t op = OP_INVALID;
 
             if (*s == T_PLUS) {
-                op = OP_ADD;
+                op = expect_unary ? OP_NO_OP : OP_ADD;
             } else if (*s == T_MINUS) {
-                op = expect_unary_minus ? OP_NEG : OP_SUB;
+                op = expect_unary ? OP_NEG : OP_SUB;
             } else if (*s == T_ASTERISK) {
                 op = OP_MULT;
             } else if (*s == T_SLASH) {
@@ -618,7 +619,12 @@ static uint8_t *compile_expression(uint8_t *s) {
             } else if (*s == T_OR) {
                 op = OP_OR;
             } else if (*s == T_NOT) {
-                op = OP_NOT;
+                if (expect_unary) {
+                    op = OP_NOT;
+                } else {
+                    // TODO generate syntax error.
+                    break;
+                }
             } else if (*s == T_EQUAL) {
                 if (s[1] == T_LESS_THAN) {
                     s += 1;
@@ -659,6 +665,7 @@ static uint8_t *compile_expression(uint8_t *s) {
                     pop_operator_stack();
                 }
                 if (g_op_stack_size == 0) {
+                    // TODO we should generate a syntax error here.
                     print("Extra close parenthesis\n");
                 } else {
                     // Pop open parenthesis.
@@ -666,13 +673,21 @@ static uint8_t *compile_expression(uint8_t *s) {
                 }
             }
 
-            // Expect unary minus after operators or open parenthesis. Expect
-            // binary minus after close parenthesis.
-            expect_unary_minus = op != OP_CLOSE_PARENS;
+            // Check that we didn't have an inappropriate unary operator.
+            if (expect_unary && op != OP_NO_OP && op != OP_NEG && op != OP_NOT &&
+                    op != OP_OPEN_PARENS) {
+
+                // TODO we should generate a syntax error here.
+                break;
+            }
+
+            // Expect unary operator after operators or open parenthesis. Expect
+            // binary operator after close parenthesis.
+            expect_unary = op != OP_CLOSE_PARENS;
 
             if (op != OP_INVALID) {
                 s += 1;
-                if (op != OP_CLOSE_PARENS) {
+                if (op != OP_CLOSE_PARENS && op != OP_NO_OP) {
                     push_operator_stack(op);
                 }
             } else {
@@ -685,6 +700,7 @@ static uint8_t *compile_expression(uint8_t *s) {
         // Empty the operator stack.
         while (g_op_stack_size > 0) {
             if (g_op_stack[g_op_stack_size - 1] == OP_OPEN_PARENS) {
+                // TODO we should generate a syntax error here.
                 print("Extra open parenthesis\n");
             }
             pop_operator_stack();
@@ -1352,16 +1368,6 @@ static void process_input_buffer() {
 int16_t main(void)
 {
     int16_t blink;
-
-    /*
-       // For testing generated code. TODO remove
-    {
-        int16_t a, b, c;
-        b = 5;
-        c = 6;
-        a = b && c;
-    }
-    */
 
     // Clear stored program.
     new_statement();
