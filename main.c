@@ -169,7 +169,7 @@ uint8_t g_input_buffer[80];
 int16_t g_input_buffer_length;
 
 // Compiled binary.
-uint8_t g_compiled[1024];
+uint8_t g_compiled[1024*10];
 uint8_t *g_c = g_compiled;
 void (*g_compiled_function)() = (void (*)()) g_compiled;
 
@@ -671,6 +671,9 @@ static uint8_t *compile_expression(uint8_t *s) {
                 compile_load_zero_page(var_addr);
 
                 if (var->data_type == DT_ARRAY) {
+                    // TODO: Check that it's been DIM'ed. The data at var_addr should
+                    // not be zero.
+
                     // Treat the open parenthesis as an array-dereferencing operator.
                     if (*s == '(') {
                         s += 1;
@@ -1422,8 +1425,12 @@ static void complete_compile_and_execute(void) {
         int i;
         uint8_t *debug_port = (uint8_t *) 0xBFFE;
 
-        // Size of program (including initial address).
-        debug_port[0] = 2 + compiled_length;
+        // Start process. Data is ignored.
+        debug_port[0] = 0;
+
+        // Size of program, little endian.
+        debug_port[1] = compiled_length & 0xFF;
+        debug_port[1] = compiled_length >> 8;
         // Address of program start, little endian.
         debug_port[1] = ((uint16_t) &g_compiled[0]) & 0xFF;
         debug_port[1] = ((uint16_t) &g_compiled[0]) >> 8;
