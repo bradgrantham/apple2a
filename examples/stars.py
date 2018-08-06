@@ -16,15 +16,13 @@ for i in range(0,10) :
     c = random.randrange(1,15)
     print str % {'init' : 10 + i, 'x' : x, 'y' : y, 'c' : c, 'which' : i}
 
-print "2100 FOR T = 0 TO TS"
-
-print "2200 FOR I = 0 TO 9"
+print "2100 T = 0"
+print "2200 I = 0"
 print "2210 OX = X(I) : OY = Y(I)"
 print "2220 X(I) = 20 + DX(I) * T / TS"
 print "2230 Y(I) = 20 + DY(I) * T / TS"
 print "2240 COLOR=0 : PLOT OX, OY"
 print "2250 COLOR=C(I) : PLOT X(I), Y(I)"
-print "2260 NEXT"
-
-print "2300 NEXT"
-print "2310 GOTO 2100"
+print "2260 I = I + 1 : IF I < 10 GOTO 2210"
+print "2300 T = T + 1 : IF T = TS THEN T = 0"
+print "2310 GOTO 2200"
