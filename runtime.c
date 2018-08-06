@@ -501,6 +501,9 @@ uint16_t next_statement(uint16_t line_number, uint16_t var_address) {
  * the variable that will store the array location.
  */
 void allocate_array(uint16_t size, uint16_t var_addr) {
+    // Actual size is one more. DIM X(10) allocates 11-entry array.
+    size += 1;
+
     // Check for overflow.
     if (g_arrays_size + size > MAX_ARRAY_WORDS) {
         print("Too many arrays.\n");

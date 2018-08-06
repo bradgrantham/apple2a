@@ -617,6 +617,8 @@ static void push_operator_stack(uint8_t op) {
         // All our operators are left-associative, so no special check for the case
         // of equal precedence.
         while (g_op_stack_size > 0 &&
+                op != OP_OPEN_PARENS &&
+                op != OP_ARRAY_DEREF &&
                 (top_op = g_op_stack[g_op_stack_size - 1]) != OP_OPEN_PARENS &&
                 top_op != OP_ARRAY_DEREF &&
                 OP_PRECEDENCE(top_op) >= OP_PRECEDENCE(op)) {

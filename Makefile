@@ -7,7 +7,7 @@ endif
 CC65	?=	$(TREES)/cc65/bin
 APPLE2E	?=	$(TREES)/apple2e/apple2e
 
-CPU     =       65C02
+CPU     =       6502
 ROM	= 	apple2a.rom
 LIB	=	apple2rom.lib
 
