@@ -1,0 +1,9 @@
+10 GR
+15 COLOR=5
+20 Y = 0
+30 X = 0
+40 IF (20-X)*(20-X) + (20-Y)*(20-Y) < 100 THEN PLOT X, Y
+50 X = X + 1
+60 IF X < 40 GOTO 40
+70 Y = Y + 1
+80 IF Y < 40 GOTO 30
