@@ -6,12 +6,12 @@ Runs between 5 and 30 times faster.
 
 Supported features: The classic way to enter programs with
 line numbers, 16-bit integer variables, `HOME`, `PRINT`, `IF/THEN`,
-`FOR/NEXT`, `GOTO`, low-res graphics (`GR`, `PLOT`, `COLOR=`, `TEXT`),
+`FOR/NEXT`, `GOTO`, low-res graphics (`GR`, `PLOT`, `COLOR=`, `TEXT`), `REM`,
 `DIM` (single-dimensional arrays), `POKE`, and integer and boolean arithmetic.
 
 Not supported: Floating point, strings,
 high-res graphics, `DATA/READ/RESUME`, `GOSUB/RETURN/POP`,
-`REM`, multi-dimensional arrays, keyboard input, exponentiation (`A^B`), and cassette I/O.
+multi-dimensional arrays, keyboard input, exponentiation (`A^B`), and cassette I/O.
 
 # Dependencies
 

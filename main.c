@@ -63,6 +63,7 @@ uint8_t title_length = 9;
 #define T_NEXT 0x9A
 #define T_NOT 0x9B
 #define T_DIM 0x9C
+#define T_REM 0x9D
 
 // Operators. These encode both the operator (high nybble) and the precedence
 // (low nybble). Lower precedence has a lower low nybble value. For example,
@@ -162,6 +163,7 @@ static uint8_t *TOKEN[] = {
     "NEXT",
     "NOT",
     "DIM",
+    "REM",
 };
 static int16_t TOKEN_COUNT = sizeof(TOKEN)/sizeof(TOKEN[0]);
 
@@ -1053,7 +1055,12 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                 add_call(print_int);
             }
 
-            add_call(print_newline);
+            if (*s == ';') {
+                // Ends with a semicolon, don't print newline.
+                s += 1;
+            } else {
+                add_call(print_newline);
+            }
         } else if (*s == T_LIST) {
             s += 1;
             add_call(list_statement);
@@ -1327,6 +1334,9 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
                     break;
                 }
             }
+        } else if (*s == T_REM) {
+            // Done with line.
+            break;
         } else if (*s == T_GR) {
             s += 1;
             add_call(gr_statement);
@@ -1594,23 +1604,6 @@ int16_t main(void)
 
     // Initialize UI.
     home();
-
-    // Display the character set.
-    /*
-    if (1) {
-        int16_t i;
-        for (i = 0; i < 256; i++) {
-            uint8_t *loc;
-            // Fails with: unhandled instruction B2
-            move_cursor(i % 16, i >> 4);
-            // Works.
-            // move_cursor(i & 0x0F, i >> 4);
-            loc = cursor_pos();
-            *loc = i;
-        }
-        while(1);
-    }
-    */
 
     // Print title.
     move_cursor((40 - title_length) / 2, 0);
