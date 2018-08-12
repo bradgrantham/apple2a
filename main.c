@@ -9,8 +9,10 @@ uint8_t title_length = 9;
 
 // 6502 instructions.
 #define I_ORA_ZPG 0x05
+#define I_PHP 0x08
 #define I_CLC 0x18
 #define I_JSR 0x20
+#define I_PLP 0x28
 #define I_SEC 0x38
 #define I_PHA 0x48
 #define I_JMP_ABS 0x4C
@@ -95,7 +97,7 @@ uint8_t title_length = 9;
 #define OP_INVALID 0xFF
 
 // Maximum number of lines in stored program.
-#define MAX_LINES 128
+#define MAX_LINES 56
 
 // Maximum number of operators in the operator stack.
 #define MAX_OP_STACK 16
@@ -501,26 +503,31 @@ static void pop_operator_stack() {
             c[1] = (uint8_t) &tmp1;
             c[2] = I_ORA_ZPG;
             c[3] = (uint8_t) &tmp1;
-            // If so, skip other test. A contains 0.
-            c[4] = I_BEQ_REL;
-            c[5] = 11; // 3 + 6 + 2
-            g_c = c + 6;
-            add_call(popax); // 3 instructions
+            c[4] = I_PHP;               // Save the zero bit.
+            g_c = c + 5;
+            add_call(popax);            // Pop first parameters. 3 instructions.
             c = g_c;
-            // See if first operand is 0.
-            c[0] = I_STX_ZPG;
-            c[1] = (uint8_t) &tmp1;
-            c[2] = I_ORA_ZPG;
-            c[3] = (uint8_t) &tmp1;
+            c[0] = I_PLP;               // Restore zero bit from second operand.
+            c[1] = I_BNE_REL;           // Check whether second operand was zero.
+            c[2] = 4;                   // Not zero, continue to first parameter.
+            c[3] = I_LDA_IMM;
+            c[4] = 0;
+            c[5] = I_BEQ_REL;           // Zero bit always true here, will always jump.
+            c[6] = 8;                   // Set X to zero and exit.
+            // See if first operand (we just popped) is 0.
+            c[7] = I_STX_ZPG;
+            c[8] = (uint8_t) &tmp1;
+            c[9] = I_ORA_ZPG;
+            c[10] = (uint8_t) &tmp1;
             // If so, skip setting A to 1. A contains 0.
-            c[4] = I_BEQ_REL;
-            c[5] = 2; // The LDA below.
+            c[11] = I_BEQ_REL;
+            c[12] = 2; // The LDA below.
             // Set A to 1.
-            c[6] = I_LDA_IMM;
-            c[7] = 1;
-            c[8] = I_LDX_IMM;     // The BEQs above arrive here.
-            c[9] = 0;
-            g_c = c + 10;
+            c[13] = I_LDA_IMM;
+            c[14] = 1;
+            c[15] = I_LDX_IMM;          // The BEQs above arrive here.
+            c[16] = 0;
+            g_c = c + 17;
             break;
 
         case OP_OR:
@@ -532,26 +539,27 @@ static void pop_operator_stack() {
             c[1] = (uint8_t) &tmp1;
             c[2] = I_ORA_ZPG;
             c[3] = (uint8_t) &tmp1;
-            // If not, skip other test.
-            c[4] = I_BNE_REL;
-            c[5] = 9; // 3 + 6
+            c[4] = I_STA_ZPG;
+            c[5] = (uint8_t) &tmp2;     // Store OR of bytes in tmp2 for later.
             g_c = c + 6;
-            add_call(popax); // 3 instructions
+            add_call(popax);            // Pop first parameters. 3 instructions.
             c = g_c;
             // See if first operand is 0.
             c[0] = I_STX_ZPG;
             c[1] = (uint8_t) &tmp1;
             c[2] = I_ORA_ZPG;
             c[3] = (uint8_t) &tmp1;
+            c[4] = I_ORA_ZPG;
+            c[5] = (uint8_t) &tmp2;     // OR with other parameter.
             // If so, skip setting A to 1. A contains 0.
-            c[4] = I_BEQ_REL;
-            c[5] = 2; // The LDA below.
+            c[6] = I_BEQ_REL;
+            c[7] = 2; // The LDA below.
             // Set A to 1.
-            c[6] = I_LDA_IMM;     // The BNE arrives here.
-            c[7] = 1;
-            c[8] = I_LDX_IMM;     // The BEQ arrives here.
-            c[9] = 0;
-            g_c = c + 10;
+            c[8] = I_LDA_IMM;
+            c[9] = 1;
+            c[10] = I_LDX_IMM;     // The BEQs above arrive here.
+            c[11] = 0;
+            g_c = c + 12;
             break;
 
         case OP_NOT:
@@ -1588,12 +1596,6 @@ static void process_input_buffer() {
 int16_t main(void)
 {
     int16_t blink;
-
-    {
-        uint16_t *foo;
-        int x = 5;
-        blink = foo[x];
-    }
 
 
     // Clear stored program.

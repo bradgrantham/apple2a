@@ -510,15 +510,6 @@ void allocate_array(uint16_t size, uint16_t var_addr) {
     } else {
         // Allocate next chunk.
         *(uint16_t *) var_addr = (uint16_t) (g_arrays + g_arrays_size);
-
-        // TODO temporary, fill with stuff.
-        {
-            int i;
-            for (i = 0; i < size; i++) {
-                g_arrays[g_arrays_size + i] = i;
-            }
-        }
-
         g_arrays_size += size;
     }
 }

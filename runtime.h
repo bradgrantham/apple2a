@@ -7,7 +7,7 @@
 #define INVALID_LINE_NUMBER 0xFFFF
 
 // Maximum number of variables. These fit in the zero page.
-#define MAX_VARIABLES 16
+#define MAX_VARIABLES 32
 
 // Location of first variable in zero page. See zeropage.s and zeropage.inc
 // in the compiler tree. They seem to use 26 bytes, so we start after that.

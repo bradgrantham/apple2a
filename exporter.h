@@ -31,5 +31,7 @@ extern unsigned int ptr1;
 // One byte each.
 extern unsigned char tmp1;
 #pragma zpsym ("tmp1");
+extern unsigned char tmp2;
+#pragma zpsym ("tmp2");
 
 #endif // __EXPORTER_H__

@@ -50,4 +50,6 @@
 
 .importzp   tmp1
 .exportzp   _tmp1 = tmp1
+.importzp   tmp2
+.exportzp   _tmp2 = tmp2
 
