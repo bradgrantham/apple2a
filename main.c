@@ -1597,7 +1597,6 @@ int16_t main(void)
 {
     int16_t blink;
 
-
     // Clear stored program.
     new_statement();
 
