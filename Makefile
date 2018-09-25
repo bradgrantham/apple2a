@@ -8,13 +8,14 @@ CC65	?=	$(TREES)/cc65/bin
 APPLE2E	?=	$(TREES)/apple2e/apple2e
 
 CPU     =       6502
+BIN	= 	apple2a.bin
 ROM	= 	apple2a.rom
 LIB	=	apple2rom.lib
 
 CC65_FLAGS = -t none --cpu $(CPU) --register-vars
 
-$(ROM): a.out
-	(dd count=5 bs=4096 if=/dev/zero 2> /dev/null; cat a.out) > $(ROM)
+$(ROM): $(BIN)
+	(dd count=5 bs=4096 if=/dev/zero 2> /dev/null; cat $(BIN)) > $(ROM)
 
 .PHONY: run
 run: $(ROM)
@@ -24,12 +25,12 @@ run: $(ROM)
 debug: $(ROM)
 	lldb -- $(APPLE2E) -mute -map main.map $(ROM)
 
-a.out: main.o interrupt.o vectors.o exporter.o platform.o runtime.o apple2rom.cfg $(LIB)
-	$(CC65)/ld65 -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o exporter.o platform.o runtime.o main.o $(LIB)
+$(BIN): main.o interrupt.o vectors.o exporter.o platform.o runtime.o apple2rom.cfg $(LIB)
+	$(CC65)/ld65 -o $(BIN) -C apple2rom.cfg -m main.map --dbgfile main.dbg interrupt.o vectors.o exporter.o platform.o runtime.o main.o $(LIB)
 	awk -f rom_usage.awk < main.map
 
 clean:
-	rm -f *.o *.lst a.out platform.s runtime.s main.s $(LIB) tmp.lib
+	rm -f *.o *.lst $(BIN) $(ROM) platform.s runtime.s main.s $(LIB) tmp.lib
 
 main.s: main.c exporter.h platform.h runtime.h
 	$(CC65)/cc65 $(CC65_FLAGS) -O $<

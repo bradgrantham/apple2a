@@ -6,6 +6,7 @@ runtime.s
 *.dbg
 *.map
 *.rom
+*.bin
 a.out
 *.lst
 apple2rom.lib
