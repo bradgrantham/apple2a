@@ -13,6 +13,8 @@ Not supported: Floating point, strings,
 high-res graphics, `DATA/READ/RESUME`, `GOSUB/RETURN/POP`,
 multi-dimensional arrays, keyboard input, exponentiation (`A^B`), and cassette I/O.
 
+[Full write-up](https://www.teamten.com/lawrence/projects/apple2a/)
+
 # Dependencies
 
 * [cc65](https://github.com/cc65/cc65)
