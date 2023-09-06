@@ -1270,8 +1270,8 @@ static void compile_buffer(uint8_t *buffer, uint16_t line_number) {
             c[7] = 3;                    // Skip over indirect jump.
             // Jump to top of loop, indirectly through ptr1, which has the address.
             c[8] = I_JMP_IND;
-            c[9] = (uint8_t) &ptr1 & 0xFF;
-            c[10] = (uint8_t) &ptr1 >> 8;
+            c[9] = (uint8_t) (&ptr1 & 0xFF);
+            c[10] = (uint8_t) (&ptr1 >> 8);
             g_c = c + 11;
         } else if (*s == T_DIM) {
             s += 1;
